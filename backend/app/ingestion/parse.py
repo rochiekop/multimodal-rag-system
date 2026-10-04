@@ -84,8 +84,11 @@ def parse_document(data: bytes, filename: str) -> ParsedDocument:
     from docling.datamodel.base_models import ConversionStatus, DocumentStream
 
     stream = DocumentStream(name=_stream_name(filename), stream=io.BytesIO(data))
+    converter = _converter()  # construction errors are infrastructure failures: not ParseError
     try:
-        result = _converter().convert(stream, raises_on_error=False)
+        result = converter.convert(stream, raises_on_error=False)
+    except (MemoryError, OSError):
+        raise  # transient: let the job retry
     except Exception as exc:  # Docling raises various backend errors on corrupt input
         raise ParseError(f"Could not read document: {exc}") from exc
     if result.status not in (ConversionStatus.SUCCESS, ConversionStatus.PARTIAL_SUCCESS):

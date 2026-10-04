@@ -124,3 +124,50 @@ def test_scanned_pdf_gets_ocr_text_pages_and_positions() -> None:
     chunks = build_chunks(parsed.doc)
     assert any("twenty days" in c.text.lower() for c in chunks)
     assert chunks[0].page == 1 and chunks[0].bbox is not None
+
+
+def test_heading_only_document_keeps_headings_as_text() -> None:
+    chunks = build_chunks(parse_document(b"# A\n\n## B", "h.md").doc)
+    assert [c.text for c in chunks] == ["A", "B"]
+    assert all(c.modality == "text" for c in chunks)
+
+
+def test_table_markdown_has_no_padding_runs() -> None:
+    table = build_chunks(parse_document(MD, "handbook.md").doc)[1]
+    assert "  " not in table.text
+    assert "|---" in table.text and table.text.startswith("| Type")
+
+
+class _FakeConverter:
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+
+    def convert(self, *args: object, **kwargs: object) -> object:
+        raise self.exc
+
+
+def test_transient_errors_propagate_from_parse(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.ingestion.parse._converter", lambda: _FakeConverter(OSError("disk")))
+    with pytest.raises(OSError):
+        parse_document(b"x", "a.md")
+    monkeypatch.setattr("app.ingestion.parse._converter", lambda: _FakeConverter(MemoryError()))
+    with pytest.raises(MemoryError):
+        parse_document(b"x", "a.md")
+
+
+def test_converter_construction_errors_propagate(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom() -> object:
+        raise RuntimeError("model load failed")
+
+    monkeypatch.setattr("app.ingestion.parse._converter", boom)
+    with pytest.raises(RuntimeError) as info:
+        parse_document(b"x", "a.md")
+    assert not isinstance(info.value, ParseError)
+
+
+def test_other_conversion_errors_are_parse_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.ingestion.parse._converter", lambda: _FakeConverter(RuntimeError("bad file"))
+    )
+    with pytest.raises(ParseError):
+        parse_document(b"x", "a.md")
