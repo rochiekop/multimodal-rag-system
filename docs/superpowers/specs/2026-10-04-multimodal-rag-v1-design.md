@@ -24,7 +24,7 @@ The product has two sides:
 | Scale target | **Medium–large**: 10k–100k documents, up to ~10M chunks per installation |
 | Models | **Cloud APIs by default** (Claude / OpenAI / Gemini); **self-hosted models optional** (vLLM / Ollama / TEI) |
 | Backend | Python, **FastAPI**, **LangChain** |
-| Frontend | **Next.js** (App Router), Tailwind v4, [shadcn/ui](https://ui.shadcn.com/); one app with `/app` and `/admin` areas; admin built on the **ShadcnStore Dashboard & Landing Template** (MIT), see 6.8 |
+| Frontend | **Next.js** (App Router), Tailwind v4, [shadcn/ui](https://ui.shadcn.com/); one app with `/app` and `/admin` areas; built from **official shadcn/ui components and blocks** ([shadcn-ui/ui](https://github.com/shadcn-ui/ui)), see 6.8 |
 | Search store | **Qdrant** (dense + sparse hybrid) |
 | App data | **PostgreSQL** |
 | File store | **MinIO** |
@@ -229,12 +229,14 @@ All checks are small LangChain runnables in the `guardrails` module, configurabl
 Admins see user conversations only through the review queue. Every admin view of a user's conversation is audited.
 
 ### 6.8 Frontend foundation
-- **Base:** the Next.js version of the [ShadcnStore Dashboard & Landing Template](https://github.com/shadcnstore/shadcn-dashboard-landing-template) (MIT license; Next.js 16, React 19, Tailwind v4, shadcn/ui, Recharts, TanStack Table, react-hook-form + zod). The template's `License.md` copyright notice is kept in `frontend/`.
-- **Admin console (`/admin`):** reuses the template's sidebar layout, header, theme customizer, dashboard cards and charts (Dashboard page), data tables (Documents, Users & groups, Audit log, Review queue, Evaluation runs), settings pages (Settings, Guardrails, Models & RAG config) and error pages.
-- **User app (`/app`):** same design system and components with a simpler layout; the template's chat page is the starting point for the chat UI (streaming, citation cards, source viewer added).
-- **Auth pages:** one sign-in page plus a forced password-change page, adapted from the template's sign-in variant. The template's sign-up and forgot-password pages are **removed**, because v1 has no self-registration and no email.
-- **Removed demo content:** landing page, mail, tasks, calendar, pricing, FAQs, billing and connections pages, plus all mock data.
-- **New shadcn components** are added with the shadcn CLI (`components.json` from the template).
+- **Base:** a fresh Next.js (App Router, TypeScript, Tailwind v4) app initialized with the **official shadcn/ui CLI** (`npx shadcn@latest init`), using components and blocks from the official registry ([ui.shadcn.com](https://ui.shadcn.com/), source [shadcn-ui/ui](https://github.com/shadcn-ui/ui), MIT). Components are copied into `frontend/components/ui` and owned by the project. Supporting libraries are the ones shadcn uses: Recharts (charts), TanStack Table (data tables), react-hook-form + zod (forms), lucide-react (icons), sonner (toasts), next-themes (light/dark).
+- **Admin console (`/admin`):** built on the official **`dashboard-01`** block (sidebar, site header, section cards, interactive area chart, data table):
+  - Dashboard page: section cards + charts
+  - Documents, Users & groups, Audit log, Review queue, Evaluation runs: the block's data table pattern
+  - Settings, Guardrails, Models & RAG config: forms built from shadcn `form`, `input`, `select`, `switch`, `tabs`
+- **User app (`/app`):** shadcn `sidebar` (conversation history) + a chat view built from shadcn components (`scroll-area`, `textarea`, `card`, `avatar`, `hover-card`, `sheet` for the source viewer). There is no official chat block, so the chat UI is our own composition.
+- **Auth pages:** sign-in from an official **login block** (e.g. `login-03`) plus a forced password-change page with the same layout. No sign-up or forgot-password pages, because v1 has no self-registration and no email.
+- **Theming:** shadcn CSS variables with light/dark mode; branding (logo, primary color) is configurable in admin Settings.
 
 ### 6.9 Audit log
 Append-only table. It records: logins and failures, user/group/role changes, uploads, deletes, restores, permission changes, RagConfig edits and activations, guardrail blocks and flags, strike locks, and admin views of conversations. Each entry has actor, action, target, details (JSON), timestamp and request ID.
