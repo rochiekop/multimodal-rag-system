@@ -27,7 +27,8 @@ The product has two sides:
 | Frontend | **Next.js** (App Router), Tailwind v4, [shadcn/ui](https://ui.shadcn.com/); one app with `/app` and `/admin` areas; built from **official shadcn/ui components and blocks** ([shadcn-ui/ui](https://github.com/shadcn-ui/ui)), see 6.8 |
 | Search store | **Qdrant** (dense + sparse hybrid) |
 | App data | **PostgreSQL** |
-| File store | **MinIO** |
+| File store | **Docker volume** behind a `FileStore` interface (MinIO was discontinued in 2025–26; an S3 implementation can be added later). Admins manage files through the admin console. |
+| Default AI provider for ingestion | **OpenAI**: embeddings (`text-embedding-3-large`) and figure/image descriptions (vision model, configurable) |
 | Job queue | **Celery + Redis** |
 | Observability | **Arize Phoenix** (LLM tracing) + admin dashboard from Postgres |
 | Evaluation | **Ragas** metrics, run in our worker |
@@ -69,9 +70,8 @@ The product has two sides:
 | `worker` | Celery workers (same Python codebase): ingestion and evaluation jobs; horizontally scalable |
 | `postgres` | App data: users, groups, documents, collections, conversations, configs, evals, audit log, Phoenix storage |
 | `qdrant` | Chunk index: dense + sparse vectors with payload metadata |
-| `minio` | Original files, converted PDFs, rendered page images, extracted figures |
+| `files` volume | Original files, rendered page images, extracted figures (mounted into `api` and `worker`) |
 | `redis` | Celery broker, rate-limit counters, caches |
-| `gotenberg` | Converts office formats to PDF (LibreOffice) |
 | `clamav` | Virus scan of uploads |
 | `phoenix` | LLM tracing and experiment UI |
 
@@ -105,17 +105,16 @@ pdf, doc/docx, ppt/pptx, xls/xlsx/csv, md, txt, html, png/jpg/tiff (including sc
 ### 3.2 Upload (synchronous, API)
 1. Validate the **real file type from file content** (not the extension), enforce the size limit, and protect against zip bombs.
 2. Compute a **SHA-256** hash of the content. Identical content already present → flagged as a duplicate and not re-ingested. Same filename in the same collection with different content → new **version** of that document.
-3. Store the original in MinIO, create a `DocumentVersion` with status `queued`, enqueue an ingestion job, and return immediately.
+3. Store the original in the file store, create a `DocumentVersion` with status `queued`, enqueue an ingestion job, and return immediately.
 
 ### 3.3 Processing (worker)
 
-`scan → convert → parse → enrich → chunk → embed → index → ready`
+`scan → parse → enrich → chunk → embed → index → ready`
 
 | Stage | Behavior |
 |---|---|
 | Scan | ClamAV. Infected → status `rejected`, stop. |
-| Convert | Office formats → PDF via Gotenberg; macros are not executed or preserved. md/txt/html/images skip this stage. |
-| Parse | Docling (via `langchain-docling`): layout, reading order, headings, tables as Markdown, figures, OCR for scanned pages. Render page images to MinIO. |
+| Parse | Docling reads every supported format directly (no Office→PDF conversion; macros are never executed): layout, reading order, headings, tables as Markdown, figures, OCR for scanned pages. Page images are rendered for PDFs and images (Office files have no page previews; their citations point to the section). |
 | Enrich | A vision LLM writes a searchable description of each figure, chart or image. Large tables get a short summary in addition to the table Markdown. |
 | Chunk | Structure-aware chunks of ~500 tokens with overlap. Tables and figures are never split. Each chunk is prefixed with a context header: `Doc title › Section › Subsection`. |
 | Embed | Dense embedding plus sparse BM25 vector per chunk, in batches. |
@@ -126,7 +125,7 @@ pdf, doc/docx, ppt/pptx, xls/xlsx/csv, md, txt, html, png/jpg/tiff (including sc
 - **Retries:** Celery retries with exponential backoff. After the final failure, status is `failed`, and the failing stage and error are visible in the admin console with a **Retry** action.
 - **Version swap:** the new version is fully indexed before the old version's chunks are deleted, so there is no gap in answerability.
 - **Permission or collection changes** update Qdrant payloads directly, without re-embedding.
-- **Status tracking:** `queued → scanning → converting → parsing → enriching → chunking → embedding → indexing → ready | failed | rejected`, shown live in the admin console, along with queue depth.
+- **Status tracking:** `queued → scanning → parsing → enriching → chunking → embedding → indexing → ready | failed | rejected`, shown live in the admin console, along with queue depth.
 
 ---
 
@@ -295,7 +294,7 @@ To upgrade: pull new images and run `docker compose up -d`; migrations apply aut
 
 ### 8.3 Production details
 - Multi-stage images, non-root users, pinned versions, named volumes, health checks with `depends_on: condition: service_healthy`.
-- `make backup` / `make restore`: Postgres dump + Qdrant snapshot + MinIO mirror into one timestamped folder.
+- `make backup` / `make restore`: Postgres dump + Qdrant snapshot + copy of the files volume into one timestamped folder.
 - Qdrant: **int8 scalar quantization** in RAM, original vectors on disk (~4× memory reduction).
 - Sizing guidance: medium ≈ 4 vCPU / 16 GB RAM; large (~10M chunks) ≈ 8 vCPU / 32 GB RAM / 500 GB SSD.
 
@@ -308,7 +307,7 @@ TDD throughout.
 | Level | Coverage |
 |---|---|
 | Unit (pytest) | Every module in isolation; LangChain fake chat models and embeddings for deterministic, free tests |
-| Integration (testcontainers) | Real Postgres, Qdrant, Redis, MinIO; end-to-end ingestion of fixture files (PDF with table, scanned image, pptx, docx, md) |
+| Integration (testcontainers) | Real Postgres, Qdrant, Redis; end-to-end ingestion of fixture files (PDF with table, scanned image, pptx, docx, md) |
 | Security suite | Users never retrieve chunks outside their access, including after permission changes and version swaps; an automatic test verifies **every API route** has auth and role checks; guardrail tests with harmful and injection prompts |
 | Frontend E2E (Playwright) | Login → ask → citation shown; admin upload → status reaches `ready` |
 | CI (GitHub Actions) | ruff, mypy, eslint, all tests, Docker image builds on every push |
