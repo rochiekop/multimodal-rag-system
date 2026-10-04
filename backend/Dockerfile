@@ -10,10 +10,21 @@ COPY migrations ./migrations
 COPY app ./app
 
 FROM python:3.12.11-slim-bookworm
-RUN useradd --create-home --uid 10001 appuser
+# Shared libraries needed by OpenCV/onnxruntime (used by Docling's OCR)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd --create-home --uid 10001 appuser \
+    && mkdir -p /data/files /app/.cache && chown appuser:appuser /data/files /app /app/.cache
 WORKDIR /app
 COPY --from=builder --chown=appuser:appuser /app /app
-ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/app/.cache/huggingface \
+    TIKTOKEN_CACHE_DIR=/app/.cache/tiktoken \
+    FASTEMBED_CACHE_PATH=/app/.cache/fastembed \
+    RAG_FILES_DIR=/data/files
 USER appuser
+RUN python -m app.ingestion.warmup
 EXPOSE 8000
 CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --proxy-headers"]

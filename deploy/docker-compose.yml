@@ -1,5 +1,12 @@
 name: multimodal-rag
 
+x-backend-env: &backend-env
+  RAG_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  RAG_REDIS_URL: redis://redis:6379/0
+  RAG_QDRANT_URL: http://qdrant:6333
+  RAG_CLAMAV_HOST: clamav
+  RAG_FILES_DIR: /data/files
+
 services:
   postgres:
     image: postgres:17.6-alpine
@@ -16,16 +23,54 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:8.8.3-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    restart: unless-stopped
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+  clamav:
+    image: clamav/clamav:1.5.4-debian
+    restart: unless-stopped
+    environment:
+      CLAMD_CONF_StreamMaxLength: 110M
+      CLAMD_CONF_MaxFileSize: 110M
+      CLAMD_CONF_MaxScanSize: 400M
+    volumes:
+      - clamav-db:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
+
   api:
     build:
       context: ../backend
     restart: unless-stopped
     env_file: .env
-    environment:
-      RAG_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    environment: *backend-env
+    volumes:
+      - files:/data/files
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
@@ -39,5 +84,24 @@ services:
       retries: 5
       start_period: 20s
 
+  worker:
+    build:
+      context: ../backend
+    restart: unless-stopped
+    command: ["celery", "-A", "app.ingestion.tasks", "worker", "-Q", "ingestion", "--concurrency=2", "--loglevel=INFO"]
+    env_file: .env
+    environment: *backend-env
+    volumes:
+      - files:/data/files
+    depends_on:
+      api:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+
 volumes:
   postgres-data:
+  redis-data:
+  qdrant-data:
+  clamav-db:
+  files:
