@@ -11,8 +11,9 @@ from app.core.config import Settings
 from app.core.security import (
     WeakPasswordError,
     hash_password,
+    hash_password_async,
     validate_password_strength,
-    verify_password,
+    verify_password_async,
 )
 from app.users.models import User
 
@@ -61,10 +62,11 @@ async def authenticate(
 ) -> User:
     now = now or datetime.now(UTC)
     normalized = username.strip().lower()
-    user = await session.scalar(select(User).where(User.username == normalized))
+    # Row lock serialises concurrent attempts for one user so failed-attempt counts aren't lost.
+    user = await session.scalar(select(User).where(User.username == normalized).with_for_update())
 
     if user is None:
-        verify_password(_DUMMY_HASH, password)
+        await verify_password_async(_DUMMY_HASH, password)
         await _failed(session, None, "unknown_user", normalized)
         raise InvalidCredentials()
 
@@ -72,7 +74,7 @@ async def authenticate(
         await _failed(session, user, "locked", normalized)
         raise AccountLocked(user.locked_until)
 
-    if not verify_password(user.password_hash, password):
+    if not await verify_password_async(user.password_hash, password):
         user.failed_login_count += 1
         await _failed(session, user, "bad_password", normalized)
         if user.failed_login_count >= settings.login_max_failed_attempts:
@@ -103,13 +105,13 @@ async def authenticate(
 async def change_password(
     session: AsyncSession, *, user: User, current_password: str, new_password: str
 ) -> User:
-    if not verify_password(user.password_hash, current_password):
+    if not await verify_password_async(user.password_hash, current_password):
         raise InvalidCredentials()
     if new_password == current_password:
         raise WeakPasswordError("New password must differ from the current one")
     validate_password_strength(new_password)
 
-    user.password_hash = hash_password(new_password)
+    user.password_hash = await hash_password_async(new_password)
     user.must_change_password = False
     user.token_version += 1  # signs out every other session
     await session.flush()

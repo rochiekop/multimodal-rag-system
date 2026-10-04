@@ -1,3 +1,5 @@
+import asyncio
+
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
@@ -17,6 +19,15 @@ def verify_password(password_hash: str, password: str) -> bool:
         return _hasher.verify(password_hash, password)
     except (VerificationError, InvalidHashError):
         return False
+
+
+async def hash_password_async(password: str) -> str:
+    """Argon2 is CPU- and memory-heavy; run it off the event loop in request paths."""
+    return await asyncio.to_thread(hash_password, password)
+
+
+async def verify_password_async(password_hash: str, password: str) -> bool:
+    return await asyncio.to_thread(verify_password, password_hash, password)
 
 
 def validate_password_strength(password: str) -> None:

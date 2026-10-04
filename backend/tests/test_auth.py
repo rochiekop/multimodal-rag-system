@@ -1,6 +1,9 @@
+import asyncio
 import re
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -10,8 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit import service as audit
 from app.auth import service as auth
 from app.auth.tokens import TokenError, create_access_token, decode_access_token
+from app.core import security
 from app.core.config import Settings
-from app.users.models import User
+from app.users.models import Role, User
 from tests.factories import DEFAULT_PASSWORD, bearer, login, make_user
 
 # Routes reachable without a token. Adding one must be a deliberate, reviewed decision.
@@ -218,3 +222,71 @@ async def test_every_admin_route_requires_admin_role(
         if response.status_code != 403:
             allowed.append(f"{method} {path} -> {response.status_code}")
     assert allowed == []
+
+
+# ---------- review fixes ----------
+
+
+async def test_concurrent_wrong_passwords_still_lock(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    # settings fixture: lock after 3 failures. Parallel guesses must not lose increments.
+    user = await make_user(session, username="alice")
+    responses = await asyncio.gather(
+        *[
+            client.post("/api/auth/login", json={"username": "alice", "password": "nope"})
+            for _ in range(6)
+        ]
+    )
+    assert 423 in [r.status_code for r in responses]
+    await session.refresh(user)
+    assert user.locked_until is not None
+
+
+class _RecordingHasher:
+    def __init__(self, real: Any) -> None:
+        self.real = real
+        self.threads: set[int] = set()
+        self.calls = 0
+
+    def hash(self, password: str) -> str:
+        self.calls += 1
+        self.threads.add(threading.get_ident())
+        return str(self.real.hash(password))
+
+    def verify(self, password_hash: str, password: str) -> bool:
+        self.calls += 1
+        self.threads.add(threading.get_ident())
+        return bool(self.real.verify(password_hash, password))
+
+
+async def test_password_hashing_runs_off_the_event_loop(
+    client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    alice = await make_user(session, username="alice")
+    await make_user(session, username="admin1", role=Role.ADMIN)
+    recorder = _RecordingHasher(security._hasher)
+    monkeypatch.setattr(security, "_hasher", recorder)
+    loop_thread = threading.get_ident()
+
+    token = await login(client, "admin1")
+    await client.post("/api/auth/login", json={"username": "alice", "password": "nope"})
+    await client.post("/api/auth/login", json={"username": "ghost", "password": "nope"})
+    await client.post(
+        "/api/admin/users",
+        headers=bearer(token),
+        json={"username": "worker", "full_name": "W", "password": "initial-pass-123"},
+    )
+    await client.post(
+        f"/api/admin/users/{alice.id}/reset-password",
+        headers=bearer(token),
+        json={"new_password": "temporary-pass-11"},
+    )
+    await client.post(
+        "/api/auth/change-password",
+        headers=bearer(token),
+        json={"current_password": DEFAULT_PASSWORD, "new_password": "fresh-secret-99"},
+    )
+
+    assert recorder.calls >= 7
+    assert loop_thread not in recorder.threads

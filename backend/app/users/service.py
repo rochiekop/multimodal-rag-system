@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import service as audit
-from app.core.security import hash_password, validate_password_strength
+from app.core.security import hash_password_async, validate_password_strength
 from app.users.models import Group, Role, User
 
 _USERNAME_RE = re.compile(r"[a-z0-9._-]{3,64}")
@@ -101,7 +101,7 @@ async def create_user(
     user = User(
         username=normalized,
         full_name=full_name.strip(),
-        password_hash=hash_password(password),
+        password_hash=await hash_password_async(password),
         role=role.value,
         must_change_password=must_change_password,
         groups=await _load_groups(session, group_ids),
@@ -177,7 +177,7 @@ async def reset_password(
     user = await _get_user(session, user_id)
     _ensure_can_manage(actor, Role(user.role))
     validate_password_strength(new_password)
-    user.password_hash = hash_password(new_password)
+    user.password_hash = await hash_password_async(new_password)
     user.must_change_password = True
     user.token_version += 1
     await session.flush()
