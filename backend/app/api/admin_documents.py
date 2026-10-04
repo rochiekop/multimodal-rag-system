@@ -119,7 +119,6 @@ async def upload_documents(
 ) -> list[UploadResult]:
     max_bytes = settings.max_upload_mb * 1024 * 1024
     results: list[UploadResult] = []
-    queued: list[uuid.UUID] = []
     for upload in files:
         name = upload.filename or ""
         data = await upload.read(max_bytes + 1)
@@ -149,14 +148,12 @@ async def upload_documents(
             continue
         await asyncio.to_thread(_store(request).save, service.original_key(version.id), data)
         await session.commit()
-        queued.append(version.id)
+        _enqueue(request)(version.id)
         results.append(
             UploadResult(
                 filename=name, outcome="queued", document_id=document.id, version_id=version.id
             )
         )
-    for version_id in queued:
-        _enqueue(request)(version_id)
     return results
 
 

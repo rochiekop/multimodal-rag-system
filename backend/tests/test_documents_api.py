@@ -4,6 +4,7 @@ import zipfile
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -114,6 +115,9 @@ async def test_content_must_match_extension(client: AsyncClient, session: AsyncS
         )
     ).json()
     assert [r["outcome"] for r in results] == ["invalid"] * 5
+    expected = ["not a PDF", "Unsupported file type", "empty", "binary data", "corrupt"]
+    for result, fragment in zip(results, expected, strict=True):
+        assert fragment in result["message"], result
 
 
 async def test_filename_is_sanitized(client: AsyncClient, session: AsyncSession) -> None:
@@ -244,3 +248,110 @@ async def _index_fake_chunk(app: FastAPI, doc_id: UUID, version_id: UUID) -> Non
             )
         ],
     )
+
+
+async def test_over_limit_file_is_rejected(
+    app: FastAPI, client: AsyncClient, session: AsyncSession
+) -> None:
+    token, collection_id, _ = await _setup(client, session)
+    app.state.settings.max_upload_mb = 1
+    big = b"# Big\n\n" + b"word " * 230_000
+    assert len(big) > 1024 * 1024
+    result = (await _upload(client, token, collection_id, ("big.md", big, "text/markdown"))).json()[
+        0
+    ]
+    assert result["outcome"] == "invalid"
+    assert "exceeds" in result["message"]
+
+
+async def test_docx_without_word_entries_is_rejected(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    token, collection_id, _ = await _setup(client, session)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("other/file.txt", "x")
+    result = (
+        await _upload(
+            client, token, collection_id, ("odd.docx", buffer.getvalue(), "application/zip")
+        )
+    ).json()[0]
+    assert result["outcome"] == "invalid"
+    assert "does not match its extension" in result["message"]
+
+
+async def test_invalid_upload_stores_and_enqueues_nothing(
+    app: FastAPI, client: AsyncClient, session: AsyncSession, enqueued: list[UUID]
+) -> None:
+    token, collection_id, _ = await _setup(client, session)
+    await _upload(
+        client, token, collection_id, ("virus.exe", b"MZ\x90\x00", "application/octet-stream")
+    )
+    assert enqueued == []
+    assert not (app.state.store.root / "versions").exists()
+
+
+async def test_wrong_password_leaves_document_intact(
+    app: FastAPI, client: AsyncClient, session: AsyncSession
+) -> None:
+    token, collection_id, _ = await _setup(client, session)
+    result = (
+        await _upload(client, token, collection_id, ("leave.md", MD, "text/markdown"))
+    ).json()[0]
+    version_id = UUID(result["version_id"])
+    await _index_fake_chunk(app, UUID(result["document_id"]), version_id)
+    wrong = await client.post(
+        f"/api/admin/documents/{result['document_id']}/delete",
+        headers=bearer(token),
+        json={"password": "nope"},
+    )
+    assert wrong.status_code == 403
+    session.expire_all()
+    document = await session.get(Document, UUID(result["document_id"]))
+    assert document is not None and document.deleted_at is None
+    assert (await app.state.index.list_chunks(version_id))[0]["deleted"] is False
+
+
+async def test_duplicate_detection_ignores_deleted_documents(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    token, collection_id, _ = await _setup(client, session)
+    first = (await _upload(client, token, collection_id, ("leave.md", MD, "text/markdown"))).json()[
+        0
+    ]
+    deleted = await client.post(
+        f"/api/admin/documents/{first['document_id']}/delete",
+        headers=bearer(token),
+        json={"password": DEFAULT_PASSWORD},
+    )
+    assert deleted.status_code == 200
+    again = (
+        await _upload(client, token, collection_id, ("other-name.md", MD, "text/markdown"))
+    ).json()[0]
+    assert again["outcome"] == "queued"
+    assert again["document_id"] != first["document_id"]
+
+
+async def test_earlier_files_are_enqueued_when_a_later_one_fails(
+    app: FastAPI, client: AsyncClient, session: AsyncSession, enqueued: list[UUID]
+) -> None:
+    token, collection_id, _ = await _setup(client, session)
+    real_save = app.state.store.save
+    calls = {"n": 0}
+
+    def flaky_save(key: str, data: bytes) -> None:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError("disk full")
+        real_save(key, data)
+
+    app.state.store.save = flaky_save
+    with pytest.raises(OSError):
+        await _upload(
+            client,
+            token,
+            collection_id,
+            ("a.md", MD, "text/markdown"),
+            ("b.md", MD + b"b\n", "text/markdown"),
+        )
+    assert len(enqueued) == 1
