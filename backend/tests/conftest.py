@@ -14,6 +14,7 @@ from alembic import command
 from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from qdrant_client import AsyncQdrantClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from testcontainers.community.postgres import PostgresContainer
@@ -22,6 +23,7 @@ from testcontainers.core.container import DockerContainer
 import app.models as _models  # noqa: F401  (aliased so the `app` fixture doesn't shadow it)
 from app.core.config import Settings
 from app.core.db import Base, create_engine, create_sessionmaker
+from app.ingestion.index import ChunkIndex
 from app.main import create_app
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -100,3 +102,13 @@ async def app(settings: Settings, engine: AsyncEngine) -> AsyncIterator[FastAPI]
 async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
         yield http
+
+
+@pytest_asyncio.fixture
+async def chunk_index(settings: Settings) -> AsyncIterator[ChunkIndex]:
+    client = AsyncQdrantClient(url=settings.qdrant_url)
+    index = ChunkIndex(client, settings.qdrant_collection, settings.embedding_dimensions)
+    yield index
+    if await client.collection_exists(settings.qdrant_collection):
+        await client.delete_collection(settings.qdrant_collection)
+    await client.close()
