@@ -11,6 +11,7 @@ from app.core.storage import FileStore
 from app.documents import service
 from app.documents.access import effective_access_groups
 from app.documents.schemas import (
+    ChunkOut,
     CollectionCreate,
     CollectionOut,
     CollectionUpdate,
@@ -242,3 +243,32 @@ async def retry_version(
 @router.get("/ingestion/status")
 async def ingestion_status(_: AdminUser, session: SessionDep) -> dict[str, int]:
     return await service.status_counts(session)
+
+
+@router.get("/documents/{document_id}/chunks")
+async def list_chunks(
+    document_id: uuid.UUID,
+    _: AdminUser,
+    session: SessionDep,
+    request: Request,
+    version_id: uuid.UUID | None = None,
+) -> list[ChunkOut]:
+    try:
+        document = await service.get_document(session, document_id)
+    except service.DocumentServiceError as exc:
+        raise _http_error(exc) from None
+    target = version_id or document.current_version_id
+    if target is None or target not in {v.id for v in document.versions}:
+        return []
+    known = {"position", "text", "modality", "page", "heading_path"}
+    return [
+        ChunkOut(
+            position=int(p["position"]),
+            text=str(p["text"]),
+            modality=str(p.get("modality", "text")),
+            page=p.get("page"),
+            heading_path=list(p.get("heading_path") or []),
+            extra={k: v for k, v in p.items() if k not in known},
+        )
+        for p in await _index(request).list_chunks(target)
+    ]
