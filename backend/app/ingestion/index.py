@@ -46,29 +46,35 @@ class ChunkIndex:
         if self._ready:
             return
         if not await self.client.collection_exists(self.collection):
-            await self.client.create_collection(
-                self.collection,
-                vectors_config={
-                    DENSE: models.VectorParams(
-                        size=self.dimensions, distance=models.Distance.COSINE, on_disk=True
-                    )
-                },
-                sparse_vectors_config={
-                    SPARSE: models.SparseVectorParams(modifier=models.Modifier.IDF)
-                },
-                quantization_config=models.ScalarQuantization(
-                    scalar=models.ScalarQuantizationConfig(
-                        type=models.ScalarType.INT8, always_ram=True
-                    )
-                ),
-            )
-            for field in _KEYWORD_FIELDS:
-                await self.client.create_payload_index(
-                    self.collection, field_name=field, field_schema=models.PayloadSchemaType.KEYWORD
+            try:
+                await self.client.create_collection(
+                    self.collection,
+                    vectors_config={
+                        DENSE: models.VectorParams(
+                            size=self.dimensions, distance=models.Distance.COSINE, on_disk=True
+                        )
+                    },
+                    sparse_vectors_config={
+                        SPARSE: models.SparseVectorParams(modifier=models.Modifier.IDF)
+                    },
+                    quantization_config=models.ScalarQuantization(
+                        scalar=models.ScalarQuantizationConfig(
+                            type=models.ScalarType.INT8, always_ram=True
+                        )
+                    ),
                 )
+            except Exception:
+                # A concurrent first caller may have created it; only re-raise if not.
+                if not await self.client.collection_exists(self.collection):
+                    raise
+        # Always ensure indexes (idempotent), so a half-initialised collection heals.
+        for field in _KEYWORD_FIELDS:
             await self.client.create_payload_index(
-                self.collection, field_name="deleted", field_schema=models.PayloadSchemaType.BOOL
+                self.collection, field_name=field, field_schema=models.PayloadSchemaType.KEYWORD
             )
+        await self.client.create_payload_index(
+            self.collection, field_name="deleted", field_schema=models.PayloadSchemaType.BOOL
+        )
         self._ready = True
 
     async def upsert(self, version_id: uuid.UUID, chunks: list[IndexedChunk]) -> None:

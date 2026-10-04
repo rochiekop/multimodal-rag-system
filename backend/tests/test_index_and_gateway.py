@@ -106,3 +106,57 @@ async def test_scan_bytes(reply: bytes, error: type[Exception] | None) -> None:
                 await scan_bytes("127.0.0.1", port, b"data")
             if error is VirusFound:
                 assert raised.value.signature == "Eicar-Test-Signature"
+
+
+async def test_scan_server_closes_without_reply() -> None:
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.readexactly(10)
+        writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    async with server:
+        with pytest.raises(ScanError):
+            await scan_bytes("127.0.0.1", port, b"x" * 5_000_000)
+
+
+async def test_scan_nothing_listening() -> None:
+    server = await asyncio.start_server(lambda r, w: None, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    server.close()
+    await server.wait_closed()
+    with pytest.raises(ScanError):
+        await scan_bytes("127.0.0.1", port, b"data", timeout=5)
+
+
+async def test_scan_prefers_reply_sent_before_close() -> None:
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.readexactly(10)
+        writer.write(b"INSTREAM size limit exceeded. ERROR\0")
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    async with server:
+        with pytest.raises(ScanError, match="size limit"):
+            await scan_bytes("127.0.0.1", port, b"x" * 20_000_000)
+
+
+async def test_ensure_collection_adds_missing_payload_indexes(
+    chunk_index: ChunkIndex,
+) -> None:
+    from qdrant_client import models
+
+    from app.ingestion.index import DENSE, SPARSE
+
+    await chunk_index.client.create_collection(
+        chunk_index.collection,
+        vectors_config={
+            DENSE: models.VectorParams(size=chunk_index.dimensions, distance=models.Distance.COSINE)
+        },
+        sparse_vectors_config={SPARSE: models.SparseVectorParams(modifier=models.Modifier.IDF)},
+    )
+    await chunk_index.ensure_collection()
+    schema = (await chunk_index.client.get_collection(chunk_index.collection)).payload_schema
+    assert {"access_groups", "deleted", "doc_id", "version_id", "collection_id"} <= set(schema)
