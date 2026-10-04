@@ -308,14 +308,31 @@ async def restore_document(
     return document
 
 
+STUCK_AFTER = timedelta(minutes=30)
+_IN_FLIGHT = {
+    DocumentStatus.SCANNING.value,
+    DocumentStatus.PARSING.value,
+    DocumentStatus.ENRICHING.value,
+    DocumentStatus.CHUNKING.value,
+    DocumentStatus.EMBEDDING.value,
+    DocumentStatus.INDEXING.value,
+}
+
+
 async def retry_version(
-    session: AsyncSession, *, actor: User, version_id: uuid.UUID
+    session: AsyncSession,
+    *,
+    actor: User,
+    version_id: uuid.UUID,
+    now: datetime | None = None,
 ) -> DocumentVersion:
     version = await session.get(DocumentVersion, version_id)
     if version is None:
         raise NotFound("Version not found")
-    if version.status != DocumentStatus.FAILED.value:
-        raise InvalidState("Only failed versions can be retried")
+    current = now or datetime.now(UTC)
+    stuck = version.status in _IN_FLIGHT and current - version.updated_at > STUCK_AFTER
+    if version.status != DocumentStatus.FAILED.value and not stuck:
+        raise InvalidState("Only failed or stuck versions can be retried")
     version.status = DocumentStatus.QUEUED.value
     version.error = None
     version.failed_stage = None

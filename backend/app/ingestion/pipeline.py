@@ -2,11 +2,13 @@
 Status is committed at every stage so the admin console shows live progress."""
 
 import asyncio
+import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.audit import service as audit
@@ -21,6 +23,8 @@ from app.ingestion.index import ChunkIndex, IndexedChunk
 from app.ingestion.parse import ParsedDocument
 from app.ingestion.scan import VirusFound
 from app.llm.sparse import SparseVector
+
+logger = logging.getLogger(__name__)
 
 _DONE = {DocumentStatus.READY.value, DocumentStatus.REJECTED.value}
 
@@ -116,6 +120,14 @@ async def _process(
         sparse = await asyncio.to_thread(deps.embed_sparse, texts) if texts else []
 
         await advance(DocumentStatus.INDEXING)
+        # The document was loaded long ago; lock and re-read it so the swap decision and the
+        # payload (access, deleted flag) reflect concurrent ingestions, restrictions and deletes.
+        await session.execute(
+            select(Document)
+            .where(Document.id == document.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         base = {
             "doc_id": str(document.id),
             "collection_id": str(document.collection_id),
@@ -165,10 +177,21 @@ async def _process(
         await session.commit()
 
         # Old points go only after the new ones exist, so search never has a gap.
-        if superseded:
-            await deps.index.delete_version(version.id)
-        elif previous is not None and previous.id != version.id:
-            await deps.index.delete_version(previous.id)
+        stale_id = (
+            version.id
+            if superseded
+            else previous.id
+            if previous is not None and previous.id != version.id
+            else None
+        )
+        if stale_id is not None:
+            try:
+                await deps.index.delete_version(stale_id)
+            except Exception:
+                # The version is already serving; never let cleanup undo that.
+                logger.warning(
+                    "Failed to delete stale points for version %s", stale_id, exc_info=True
+                )
         return DocumentStatus.READY
 
 

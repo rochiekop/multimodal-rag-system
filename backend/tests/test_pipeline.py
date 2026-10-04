@@ -13,7 +13,7 @@ from app.core.storage import LocalFileStore
 from app.documents.models import Collection, Document, DocumentStatus, DocumentVersion
 from app.documents.service import original_key
 from app.ingestion.errors import PermanentIngestionError
-from app.ingestion.index import ChunkIndex
+from app.ingestion.index import ChunkIndex, IndexedChunk
 from app.ingestion.parse import parse_document
 from app.ingestion.pipeline import IngestionDeps, page_key, run_ingestion
 from app.ingestion.scan import VirusFound
@@ -216,3 +216,114 @@ def test_page_key_layout() -> None:
     version_id = uuid.uuid4()
     assert page_key(version_id, 3) == f"versions/{version_id}/pages/3.png"
     assert Path(page_key(version_id, 3)).suffix == ".png"
+
+
+async def test_overlapping_ingestions_keep_newest_current(
+    session: AsyncSession, deps: IngestionDeps, engine: AsyncEngine, chunk_index: ChunkIndex
+) -> None:
+    v1 = await _version(session, deps)
+    document = await session.get(Document, v1.document_id)
+    v2 = await _version(session, deps, MD + b"\nNewer.\n", document=document)
+    plain = DeterministicFakeEmbedding(size=8)
+    deps_v2 = IngestionDeps(
+        sessionmaker=deps.sessionmaker,
+        store=deps.store,
+        index=deps.index,
+        scan=_clean,
+        parse=parse_document,
+        describe_image=_describe,
+        embed_dense=plain.aembed_documents,
+        embed_sparse=_sparse,
+    )
+    calls = 0
+
+    async def overlapping(texts: list[str]) -> list[list[float]]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await run_ingestion(v2.id, deps_v2)
+        return await plain.aembed_documents(texts)
+
+    deps.embed_dense = overlapping
+    await run_ingestion(v1.id, deps)
+
+    await session.refresh(document)
+    assert document.current_version_id == v2.id
+    assert await deps.index.count_version(v1.id) == 0
+    assert await deps.index.count_version(v2.id) > 0
+
+
+async def test_cleanup_failure_does_not_undo_ready(
+    session: AsyncSession, deps: IngestionDeps, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    v1 = await _version(session, deps)
+    await run_ingestion(v1.id, deps)
+    document = await session.get(Document, v1.document_id)
+    v2 = await _version(session, deps, MD + b"\nNewer.\n", document=document)
+
+    original = deps.index.delete_version
+
+    async def flaky_delete(version_id: uuid.UUID) -> None:
+        if version_id == v1.id:
+            raise ConnectionError("qdrant down")
+        await original(version_id)
+
+    monkeypatch.setattr(deps.index, "delete_version", flaky_delete)
+    assert await run_ingestion(v2.id, deps, final_attempt=False) is DocumentStatus.READY
+    await session.refresh(v2)
+    await session.refresh(document)
+    assert v2.status == "ready"
+    assert document.current_version_id == v2.id
+
+
+async def test_chunk_inspector_version_selection(
+    client: AsyncClient,
+    session: AsyncSession,
+    engine: AsyncEngine,
+    app,  # type: ignore[no-untyped-def]
+) -> None:
+    deps = IngestionDeps(
+        sessionmaker=create_sessionmaker(engine),
+        store=app.state.store,
+        index=app.state.index,
+        scan=_clean,
+        parse=parse_document,
+        describe_image=_describe,
+        embed_dense=DeterministicFakeEmbedding(size=8).aembed_documents,
+        embed_sparse=_sparse,
+    )
+    v1 = await _version(session, deps)
+    document = await session.get(Document, v1.document_id)
+    v2 = await _version(session, deps, MD + b"\nNewer.\n", document=document)
+    other = await _version(session, deps)
+    for v in (v1, v2, other):
+        await run_ingestion(v.id, deps)
+    await make_user(session, username="admin2", role=Role.ADMIN)
+    headers = bearer(await login(client, "admin2"))
+    base = f"/api/admin/documents/{v2.document_id}/chunks"
+
+    current = await client.get(base, headers=headers)
+    assert len(current.json()) == await app.state.index.count_version(v2.id)
+
+    # a non-current version of the same document is inspectable via ?version_id=
+    await app.state.index.upsert(
+        v1.id,
+        [
+            IndexedChunk(
+                position=0,
+                text="old",
+                dense=[0.1] * 8,
+                sparse=SparseVector(indices=[1], values=[1.0]),
+                payload={"doc_id": str(v1.document_id), "modality": "text"},
+            )
+        ],
+    )
+    older = await client.get(base, params={"version_id": str(v1.id)}, headers=headers)
+    assert [c["text"] for c in older.json()] == ["old"]
+
+    foreign = await client.get(base, params={"version_id": str(other.id)}, headers=headers)
+    assert foreign.status_code == 200
+    assert foreign.json() == []
+
+    unknown = await client.get(f"/api/admin/documents/{uuid.uuid4()}/chunks", headers=headers)
+    assert unknown.status_code == 404

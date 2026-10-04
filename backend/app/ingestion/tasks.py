@@ -26,7 +26,6 @@ celery_app.conf.update(
     broker_url=get_settings().redis_url,
     task_default_queue="ingestion",
     task_acks_late=True,
-    task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
 )
