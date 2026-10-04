@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 
+from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
@@ -37,3 +38,15 @@ async def make_user(
     session.add(user)
     await session.commit()
     return user
+
+
+async def login(client: AsyncClient, username: str, password: str = DEFAULT_PASSWORD) -> str:
+    response = await client.post(
+        "/api/auth/login", json={"username": username, "password": password}
+    )
+    assert response.status_code == 200, response.text
+    return str(response.json()["access_token"])
+
+
+def bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
