@@ -112,6 +112,9 @@ class ChunkIndex:
     async def set_document_deleted(self, doc_id: uuid.UUID, deleted: bool) -> None:
         await self._set_document_payload(doc_id, {"deleted": deleted})
 
+    async def set_document_sensitive(self, doc_id: uuid.UUID, sensitive: bool) -> None:
+        await self._set_document_payload(doc_id, {"sensitive": sensitive})
+
     async def _set_document_payload(self, doc_id: uuid.UUID, payload: dict[str, Any]) -> None:
         await self.ensure_collection()
         await self.client.set_payload(

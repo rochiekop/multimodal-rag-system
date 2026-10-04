@@ -127,11 +127,14 @@ async def update_collection(
         collection.description = description.strip()
         changes["description"] = collection.description
     if sensitive is not None:
+        access_changed = sensitive != collection.sensitive
         collection.sensitive = sensitive
         changes["sensitive"] = sensitive
     if group_ids is not None:
         new_groups = await load_groups(session, group_ids)
-        access_changed = {g.id for g in new_groups} != {g.id for g in collection.groups}
+        access_changed = access_changed or {g.id for g in new_groups} != {
+            g.id for g in collection.groups
+        }
         collection.groups = new_groups
         changes["group_ids"] = [str(g.id) for g in new_groups]
     await session.flush()
@@ -153,12 +156,13 @@ async def list_collections(session: AsyncSession) -> list[Collection]:
 async def sync_collection_access(
     session: AsyncSession, index: ChunkIndex, collection_id: uuid.UUID
 ) -> None:
-    """Push every document's effective access to its chunks (no re-embedding)."""
+    """Push every document's effective access and sensitivity to its chunks (no re-embedding)."""
     documents = await session.scalars(
         select(Document).where(Document.collection_id == collection_id)
     )
     for document in documents:
         await index.set_document_access(document.id, effective_access_groups(document))
+        await index.set_document_sensitive(document.id, document.collection.sensitive)
 
 
 RESTORE_WINDOW = timedelta(days=30)
@@ -330,7 +334,9 @@ async def retry_version(
     if version is None:
         raise NotFound("Version not found")
     current = now or datetime.now(UTC)
-    stuck = version.status in _IN_FLIGHT and current - version.updated_at > STUCK_AFTER
+    stuck = (
+        version.status in _IN_FLIGHT or version.status == DocumentStatus.QUEUED.value
+    ) and current - version.updated_at > STUCK_AFTER
     if version.status != DocumentStatus.FAILED.value and not stuck:
         raise InvalidState("Only failed or stuck versions can be retried")
     version.status = DocumentStatus.QUEUED.value
@@ -346,6 +352,15 @@ async def retry_version(
         detail={"version": version.version_no},
     )
     return version
+
+
+async def mark_queue_failed(session: AsyncSession, version_id: uuid.UUID, message: str) -> None:
+    version = await session.get(DocumentVersion, version_id)
+    if version is not None:
+        version.status = DocumentStatus.FAILED.value
+        version.failed_stage = DocumentStatus.QUEUED.value
+        version.error = message
+        await session.flush()
 
 
 async def status_counts(session: AsyncSession) -> dict[str, int]:

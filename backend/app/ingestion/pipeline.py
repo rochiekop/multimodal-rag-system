@@ -134,6 +134,7 @@ async def _process(
             "filename": document.filename,
             "access_groups": effective_access_groups(document),
             "deleted": document.deleted_at is not None,
+            "sensitive": document.collection.sensitive,
         }
         chunks = [
             IndexedChunk(
@@ -176,6 +177,8 @@ async def _process(
         )
         await session.commit()
 
+        await _resync_payload(deps, document.id)
+
         # Old points go only after the new ones exist, so search never has a gap.
         stale_id = (
             version.id
@@ -193,6 +196,24 @@ async def _process(
                     "Failed to delete stale points for version %s", stale_id, exc_info=True
                 )
         return DocumentStatus.READY
+
+
+async def _resync_payload(deps: IngestionDeps, document_id: uuid.UUID) -> None:
+    """Collection access can change while we index (the worker only locks the document row),
+    so re-read the live values in a fresh transaction and push them to the new points."""
+    try:
+        async with deps.sessionmaker() as session:
+            document = await session.get(Document, document_id)
+            if document is None:
+                return
+            groups = effective_access_groups(document)
+            deleted = document.deleted_at is not None
+            sensitive = document.collection.sensitive
+        await deps.index.set_document_access(document_id, groups)
+        await deps.index.set_document_deleted(document_id, deleted)
+        await deps.index.set_document_sensitive(document_id, sensitive)
+    except Exception:
+        logger.warning("Failed to resync payload for document %s", document_id, exc_info=True)
 
 
 async def _finish(

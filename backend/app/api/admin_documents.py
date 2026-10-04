@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import uuid
 from collections.abc import Callable
 from typing import Annotated
@@ -23,6 +24,9 @@ from app.documents.schemas import (
 )
 from app.ingestion.index import ChunkIndex
 from app.users import service as users
+
+logger = logging.getLogger(__name__)
+QUEUE_FAILED = "Could not queue for processing; use Retry"
 
 router = APIRouter(prefix="/admin", tags=["admin-documents"])
 
@@ -149,10 +153,21 @@ async def upload_documents(
             continue
         await asyncio.to_thread(_store(request).save, service.original_key(version.id), data)
         await session.commit()
-        _enqueue(request)(version.id)
+        message = ""
+        try:
+            _enqueue(request)(version.id)
+        except Exception:
+            logger.warning("Failed to enqueue version %s", version.id, exc_info=True)
+            message = QUEUE_FAILED
+            await service.mark_queue_failed(session, version.id, message)
+            await session.commit()
         results.append(
             UploadResult(
-                filename=name, outcome="queued", document_id=document.id, version_id=version.id
+                filename=name,
+                outcome="queued",
+                message=message,
+                document_id=document.id,
+                version_id=version.id,
             )
         )
     return results

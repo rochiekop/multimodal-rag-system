@@ -215,3 +215,47 @@ async def test_unknown_collection_and_unknown_group(
     )
     assert patch.status_code == 422
     assert patch.json()["detail"]["code"] == "group_not_found"
+
+
+async def test_toggling_sensitive_updates_chunk_payload(
+    app: FastAPI, client: AsyncClient, session: AsyncSession
+) -> None:
+    token = await _admin(client, session)
+    hr = await make_group(session, "hr")
+    created = await client.post(
+        "/api/admin/collections",
+        headers=bearer(token),
+        json={"name": "HR", "group_ids": [str(hr.id)]},
+    )
+    collection_id = uuid.UUID(created.json()["id"])
+    document = Document(
+        collection_id=collection_id, filename="a.md", versions=[], restricted_groups=[]
+    )
+    session.add(document)
+    await session.commit()
+    version_id = uuid.uuid4()
+    await app.state.index.upsert(
+        version_id,
+        [
+            IndexedChunk(
+                position=0,
+                text="t",
+                dense=[0.1] * 8,
+                sparse=SparseVector(indices=[1], values=[1.0]),
+                payload={
+                    "doc_id": str(document.id),
+                    "access_groups": [str(hr.id)],
+                    "deleted": False,
+                    "sensitive": False,
+                },
+            )
+        ],
+    )
+    response = await client.patch(
+        f"/api/admin/collections/{collection_id}",
+        headers=bearer(token),
+        json={"sensitive": True},
+    )
+    assert response.status_code == 200
+    payload = (await app.state.index.list_chunks(version_id))[0]
+    assert payload["sensitive"] is True

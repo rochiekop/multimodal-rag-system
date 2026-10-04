@@ -381,3 +381,59 @@ async def test_stuck_versions_can_be_retried_after_timeout(
     assert stuck.status_code == 200
     assert stuck.json()["status"] == "queued"
     assert enqueued[-1] == UUID(version_id)
+
+
+async def test_queued_versions_can_be_retried_only_after_timeout(
+    client: AsyncClient, session: AsyncSession, enqueued: list[UUID]
+) -> None:
+    from app.documents.models import DocumentVersion
+
+    token, collection_id, _ = await _setup(client, session)
+    result = (await _upload(client, token, collection_id, ("q.md", MD, "text/markdown"))).json()[0]
+    version_id = result["version_id"]
+    version = await session.get(DocumentVersion, UUID(version_id))
+    assert version is not None
+    version.updated_at = datetime.now(UTC) - timedelta(minutes=5)
+    await session.commit()
+    recent = await client.post(f"/api/admin/versions/{version_id}/retry", headers=bearer(token))
+    assert recent.status_code == 409
+
+    version.updated_at = datetime.now(UTC) - timedelta(minutes=31)
+    await session.commit()
+    stuck = await client.post(f"/api/admin/versions/{version_id}/retry", headers=bearer(token))
+    assert stuck.status_code == 200
+    assert enqueued[-1] == UUID(version_id)
+
+
+async def test_enqueue_failure_marks_version_failed_and_continues(
+    app: FastAPI, client: AsyncClient, session: AsyncSession, enqueued: list[UUID]
+) -> None:
+    from app.documents.models import DocumentVersion
+
+    token, collection_id, _ = await _setup(client, session)
+    calls = {"n": 0}
+
+    def flaky_enqueue(version_id: UUID) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ConnectionError("redis down")
+        enqueued.append(version_id)
+
+    app.state.enqueue = flaky_enqueue
+    response = await _upload(
+        client,
+        token,
+        collection_id,
+        ("a.md", MD, "text/markdown"),
+        ("b.md", MD + b"b\n", "text/markdown"),
+    )
+    assert response.status_code == 200
+    first, second = response.json()
+    assert first["outcome"] == "queued"
+    assert first["message"] == "Could not queue for processing; use Retry"
+    assert enqueued == [UUID(second["version_id"])]
+    version = await session.get(DocumentVersion, UUID(first["version_id"]))
+    assert version is not None
+    await session.refresh(version)
+    assert (version.status, version.failed_stage) == ("failed", "queued")
+    assert version.error == "Could not queue for processing; use Retry"

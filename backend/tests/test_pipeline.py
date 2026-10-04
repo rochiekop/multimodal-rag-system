@@ -327,3 +327,58 @@ async def test_chunk_inspector_version_selection(
 
     unknown = await client.get(f"/api/admin/documents/{uuid.uuid4()}/chunks", headers=headers)
     assert unknown.status_code == 404
+
+
+async def test_payload_carries_collection_sensitive_flag(
+    session: AsyncSession, deps: IngestionDeps
+) -> None:
+    version = await _version(session, deps)
+    document = await session.get(Document, version.document_id)
+    assert document is not None
+    document.collection.sensitive = True
+    await session.commit()
+    await run_ingestion(version.id, deps)
+    chunks = await deps.index.list_chunks(version.id)
+    assert chunks and all(c["sensitive"] is True for c in chunks)
+
+
+async def test_collection_group_change_during_indexing_is_not_lost(
+    session: AsyncSession, deps: IngestionDeps
+) -> None:
+    from sqlalchemy import select
+
+    from app.documents import service
+    from app.users.models import Group
+
+    version = await _version(session, deps)
+    document = await session.get(Document, version.document_id)
+    assert document is not None
+    collection_id = document.collection_id
+    keep = await make_group(session, "keep")
+    keep_id = keep.id
+    old = list(document.collection.groups)
+    document.collection.groups = [*old, keep]
+    await session.commit()
+
+    real_upsert = deps.index.upsert
+    raced = {"done": False}
+
+    async def racing_upsert(version_id: uuid.UUID, chunks: list[IndexedChunk]) -> None:
+        if not raced["done"]:
+            raced["done"] = True
+            async with deps.sessionmaker() as other:
+                collection = await other.scalar(
+                    select(Collection).where(Collection.id == collection_id)
+                )
+                assert collection is not None
+                collection.groups = [await other.get(Group, keep_id)]
+                await other.commit()
+                await service.sync_collection_access(other, deps.index, collection_id)
+        await real_upsert(version_id, chunks)
+
+    deps.index.upsert = racing_upsert  # type: ignore[method-assign]
+    status = await run_ingestion(version.id, deps)
+    await session.refresh(version)
+    assert status is DocumentStatus.READY, version.error
+    chunks = await deps.index.list_chunks(version.id)
+    assert chunks and all(c["access_groups"] == [str(keep_id)] for c in chunks)
