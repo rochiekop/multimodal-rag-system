@@ -5,6 +5,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import api_error
+from app.auth.service import InvalidCredentials, confirm_password
 from app.auth.tokens import TokenError, decode_access_token
 from app.core.config import Settings, get_app_settings
 from app.core.db import get_session
@@ -63,3 +64,12 @@ async def require_super_admin(user: CurrentUser) -> User:
 
 
 AdminUser = Annotated[User, Depends(require_admin)]
+
+
+async def ensure_password_confirmed(user: User, password: str | None) -> None:
+    try:
+        await confirm_password(user, password)
+    except InvalidCredentials:
+        raise api_error(
+            403, "password_confirmation_failed", "Re-enter your password to confirm"
+        ) from None

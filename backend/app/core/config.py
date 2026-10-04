@@ -18,6 +18,23 @@ class Settings(BaseSettings):
     login_max_failed_attempts: int = 5
     login_lockout_seconds: int = 15 * 60
 
+    redis_url: str = "redis://localhost:6379/0"
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "chunks"
+    files_dir: str = "./data/files"
+    max_upload_mb: int = 100
+
+    clamav_enabled: bool = True
+    clamav_host: str = "localhost"
+    clamav_port: int = 3310
+
+    openai_api_key: SecretStr | None = None
+    embedding_model: str = "text-embedding-3-large"
+    embedding_dimensions: int = 1024
+    vision_model: str = "gpt-5-mini"
+    chunk_max_tokens: int = 500
+    chunk_overlap_tokens: int = 50
+
     @field_validator("jwt_secret")
     @classmethod
     def _secret_long_enough(cls, value: SecretStr) -> SecretStr:

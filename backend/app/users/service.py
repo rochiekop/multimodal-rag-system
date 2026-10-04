@@ -71,7 +71,7 @@ async def _get_user(session: AsyncSession, user_id: uuid.UUID) -> User:
     return user
 
 
-async def _load_groups(session: AsyncSession, group_ids: Iterable[uuid.UUID]) -> list[Group]:
+async def load_groups(session: AsyncSession, group_ids: Iterable[uuid.UUID]) -> list[Group]:
     wanted = list(dict.fromkeys(group_ids))
     if not wanted:
         return []
@@ -104,7 +104,7 @@ async def create_user(
         password_hash=await hash_password_async(password),
         role=role.value,
         must_change_password=must_change_password,
-        groups=await _load_groups(session, group_ids),
+        groups=await load_groups(session, group_ids),
     )
     session.add(user)
     await session.flush()
@@ -145,7 +145,7 @@ async def update_user(
         user.token_version += 1
         changes["role"] = role.value
     if group_ids is not None:
-        user.groups = await _load_groups(session, group_ids)
+        user.groups = await load_groups(session, group_ids)
         changes["group_ids"] = [str(g.id) for g in user.groups]
     if is_active is not None and is_active != user.is_active:
         if not is_active and user.id == actor.id:

@@ -1,11 +1,21 @@
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from qdrant_client import AsyncQdrantClient
 
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.db import create_engine, create_sessionmaker
+from app.core.storage import LocalFileStore
+from app.ingestion.index import ChunkIndex
+
+
+def _enqueue_with_celery(version_id: uuid.UUID) -> None:
+    from app.ingestion.tasks import enqueue_ingestion  # imported lazily: Celery + pipeline
+
+    enqueue_ingestion(version_id)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -13,9 +23,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     engine = create_engine(settings.database_url)
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         yield
         await engine.dispose()
+        await application.state.index.client.close()
 
     show_docs = settings.env != "prod"
     app = FastAPI(
@@ -28,5 +39,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.state.sessionmaker = create_sessionmaker(engine)
+    app.state.store = LocalFileStore(settings.files_dir)
+    app.state.index = ChunkIndex(
+        AsyncQdrantClient(url=settings.qdrant_url),
+        settings.qdrant_collection,
+        settings.embedding_dimensions,
+    )
+    app.state.enqueue = _enqueue_with_celery
     app.include_router(api_router)
     return app
