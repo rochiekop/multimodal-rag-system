@@ -119,3 +119,9 @@ async def change_password(
         session, action="auth.password_changed", actor=user, target_type="user", target_id=user.id
     )
     return user
+
+
+async def confirm_password(user: User, password: str | None) -> None:
+    """Re-authentication for destructive actions (spec section 5.3)."""
+    if not password or not await verify_password_async(user.password_hash, password):
+        raise InvalidCredentials()

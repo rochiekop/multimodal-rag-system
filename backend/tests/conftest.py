@@ -3,6 +3,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from uuid import UUID
 
 # Must be set before app modules read settings.
 os.environ.setdefault("RAG_JWT_SECRET", "test-only-secret-" + "x" * 32)
@@ -90,12 +91,24 @@ async def session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
         yield db_session
 
 
+@pytest.fixture
+def enqueued() -> list[UUID]:
+    return []
+
+
 @pytest_asyncio.fixture
-async def app(settings: Settings, engine: AsyncEngine) -> AsyncIterator[FastAPI]:
+async def app(
+    settings: Settings, engine: AsyncEngine, enqueued: list[UUID]
+) -> AsyncIterator[FastAPI]:
     # Depends on `engine` so tables are truncated after each API test.
     application = create_app(settings)
+    application.state.enqueue = enqueued.append
     yield application
     await application.state.engine.dispose()
+    index = application.state.index
+    if await index.client.collection_exists(index.collection):
+        await index.client.delete_collection(index.collection)
+    await index.client.close()
 
 
 @pytest_asyncio.fixture
