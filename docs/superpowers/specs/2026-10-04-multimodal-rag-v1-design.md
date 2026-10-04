@@ -201,7 +201,7 @@ All checks are small LangChain runnables in the `guardrails` module, configurabl
 
 ### 6.3 Accounts
 - **Admins create users directly** with an initial password. The user **must change it at first login**.
-- Argon2 password hashing; short-lived JWT access tokens; refresh tokens in httpOnly cookies; sessions revoked on suspension or role change.
+- Argon2 password hashing; a single signed JWT access token valid for **8 hours** (users log in again after it expires). Tokens are revoked immediately on suspension, role change, password change or admin password reset. A refresh-token flow may be added with the frontend (Plan 6) if needed.
 - The first `super_admin` is created with `make create-superadmin`.
 
 ### 6.4 User app (`/app`)
