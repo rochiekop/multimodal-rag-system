@@ -8,6 +8,7 @@ from qdrant_client import AsyncQdrantClient
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.db import create_engine, create_sessionmaker
+from app.core.logging import RequestIdMiddleware, configure_logging
 from app.core.storage import LocalFileStore
 from app.ingestion.index import ChunkIndex
 
@@ -20,6 +21,8 @@ def _enqueue_with_celery(version_id: uuid.UUID) -> None:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+    if settings.env != "test":  # tests keep pytest's log capture
+        configure_logging(settings.log_level)
     engine = create_engine(settings.database_url)
 
     @asynccontextmanager
@@ -46,5 +49,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.embedding_dimensions,
     )
     app.state.enqueue = _enqueue_with_celery
+    app.add_middleware(RequestIdMiddleware)
     app.include_router(api_router)
     return app

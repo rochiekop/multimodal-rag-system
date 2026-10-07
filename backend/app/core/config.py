@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="RAG_", env_file=".env", extra="ignore")
 
     env: Literal["dev", "test", "prod"] = "dev"
+    log_level: str = "INFO"
     database_url: str = "postgresql+asyncpg://rag:rag@localhost:5432/rag"
     jwt_secret: SecretStr
     jwt_ttl_seconds: int = 8 * 60 * 60
