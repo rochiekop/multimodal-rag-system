@@ -73,3 +73,6 @@ async def ensure_password_confirmed(user: User, password: str | None) -> None:
         raise api_error(
             403, "password_confirmation_failed", "Re-enter your password to confirm"
         ) from None
+
+
+SuperAdminUser = Annotated[User, Depends(require_super_admin)]
