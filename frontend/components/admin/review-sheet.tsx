@@ -1,6 +1,6 @@
 "use client"
 
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -43,6 +43,7 @@ export function ReviewSheet({
     queryFn: adminApi.evalSets,
     enabled: !!messageId,
   })
+  const queryClient = useQueryClient()
   const [setId, setSetId] = useState("")
   const [expected, setExpected] = useState("")
   const [unanswerable, setUnanswerable] = useState(false)
@@ -55,6 +56,7 @@ export function ReviewSheet({
       }),
     onSuccess: () => {
       toast.success("Added to the test set")
+      void queryClient.invalidateQueries({ queryKey: ["admin", "eval-sets"] })
       setExpected("")
       setUnanswerable(false)
     },

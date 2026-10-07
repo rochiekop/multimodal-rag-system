@@ -177,6 +177,7 @@ export default function ReviewPage() {
         </Button>
       </div>
       <ReviewSheet
+        key={openMessage ?? "none"}
         messageId={openMessage}
         onOpenChange={(open) => !open && setOpenMessage(null)}
       />
