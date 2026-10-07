@@ -108,6 +108,7 @@ class ReviewAnswer(BaseModel):
     guardrail: dict[str, Any] | None
     feedback_rating: int | None
     feedback_comment: str | None
+    trace_id: str | None = None
     created_at: datetime
 
 
