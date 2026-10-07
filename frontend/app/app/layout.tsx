@@ -19,6 +19,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     if (me?.must_change_password) router.replace("/change-password")
   }, [me, router])
 
+  if (!me || me.must_change_password) {
+    return me ? null : (
+      <div className="flex h-svh items-center justify-center text-sm text-muted-foreground">
+        Loading…
+      </div>
+    )
+  }
+
   return (
     <SidebarProvider>
       <AppSidebar />

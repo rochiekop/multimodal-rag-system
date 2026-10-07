@@ -17,13 +17,16 @@ const conversations = [
   { id: "c2", title: "Parking", created_at: "", updated_at: "" },
 ]
 
-function setup(fetchImpl: (url: string, init?: RequestInit) => Response) {
+function setup(
+  fetchImpl: (url: string, init?: RequestInit) => Response,
+  activeId = "c1"
+) {
   const fetchMock = vi
     .spyOn(globalThis, "fetch")
     .mockImplementation(async (input, init) => fetchImpl(String(input), init))
   renderWithProviders(
     <SidebarProvider>
-      <ConversationList activeId="c1" />
+      <ConversationList activeId={activeId} />
     </SidebarProvider>
   )
   return fetchMock
@@ -97,5 +100,25 @@ describe("ConversationList", () => {
         )
       ).toBe(true)
     )
+  })
+
+  it("returns to /app after deleting the active conversation", async () => {
+    push.mockClear()
+    setup((url, init) =>
+      init?.method === "DELETE"
+        ? jsonResponse(null, 204)
+        : jsonResponse(conversations)
+    )
+    const item = (
+      await screen.findByRole("link", { name: "Leave policy" })
+    ).closest("li")!
+    await userEvent.click(
+      within(item).getByRole("button", { name: "Conversation actions" })
+    )
+    await userEvent.click(
+      await screen.findByRole("menuitem", { name: "Delete" })
+    )
+    await userEvent.click(await screen.findByRole("button", { name: "Delete" }))
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/app"))
   })
 })

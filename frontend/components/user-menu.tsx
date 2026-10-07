@@ -1,6 +1,6 @@
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ChevronsUpDownIcon,
   LogOutIcon,
@@ -10,7 +10,6 @@ import {
   UserIcon,
 } from "lucide-react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -30,9 +29,10 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { api } from "@/lib/api"
+import { navigateTo } from "@/lib/navigate"
 
 export function UserMenu() {
-  const router = useRouter()
+  const queryClient = useQueryClient()
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: api.me })
   const { theme, setTheme } = useTheme()
   const initials = (me?.full_name || me?.username || "?")
@@ -41,7 +41,8 @@ export function UserMenu() {
 
   async function signOut() {
     await api.logout().catch(() => undefined)
-    router.push("/login")
+    queryClient.clear()
+    navigateTo("/login")
   }
 
   return (
