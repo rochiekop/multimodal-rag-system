@@ -1,9 +1,12 @@
-import { QueryClient } from "@tanstack/react-query"
-import { screen, waitFor } from "@testing-library/react"
+import { QueryClient, useQuery } from "@tanstack/react-query"
+import { act, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ChatPanel } from "@/components/chat/chat-panel"
+import { CollectionSelectionProvider } from "@/components/chat/collection-selection"
+import { api } from "@/lib/api"
 import { navigateTo } from "@/lib/navigate"
 import { jsonResponse, renderWithProviders } from "@/test/render"
 
@@ -20,6 +23,19 @@ function sse(...events: [string, unknown][]): Response {
     headers: { "Content-Type": "text/event-stream" },
   })
 }
+
+const done = (content: string) =>
+  [
+    "done",
+    {
+      message_id: `m-${content}`,
+      content,
+      outcome: "answered",
+      citations: [],
+      low_confidence: false,
+      trace_id: null,
+    },
+  ] as [string, unknown]
 
 afterEach(() => vi.clearAllMocks())
 
@@ -199,5 +215,127 @@ describe("ChatPanel", () => {
     await waitFor(() =>
       expect(client.getQueryData(["conversation", "c1"])).toBeUndefined()
     )
+  })
+  it("keeps the picked collections when a new chat moves to its conversation", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input) => {
+        const url = String(input)
+        if (url === "/api/collections")
+          return jsonResponse([{ id: "k1", name: "HR", description: "" }])
+        return sse(
+          ["meta", { conversation_id: "c1", user_message_id: "u1" }],
+          done("Answer.")
+        )
+      })
+    // Stands in for the /app layout (provider) and the route (conversation id).
+    let goTo!: (id: string) => void
+    function Harness() {
+      const [id, setId] = useState<string | null>(null)
+      goTo = setId
+      return (
+        <CollectionSelectionProvider>
+          <ChatPanel
+            key={id ?? "new"}
+            conversationId={id}
+            initialMessages={[]}
+          />
+        </CollectionSelectionProvider>
+      )
+    }
+    renderWithProviders(<Harness />)
+    await userEvent.click(
+      screen.getByRole("button", { name: /All collections/ })
+    )
+    await userEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: "HR" })
+    )
+    await userEvent.keyboard("{Escape}")
+    await userEvent.type(
+      screen.getByPlaceholderText("Ask a question"),
+      "First{Enter}"
+    )
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/app/c/c1"))
+
+    // The route change remounts the panel as the started conversation.
+    act(() => goTo("c1"))
+    expect(
+      await screen.findByRole("button", { name: /HR/ })
+    ).toBeInTheDocument()
+    await userEvent.type(
+      screen.getByPlaceholderText("Ask a question"),
+      "Second{Enter}"
+    )
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([u]) => String(u) === "/api/chat")
+      ).toHaveLength(2)
+    )
+    const bodies = fetchMock.mock.calls
+      .filter(([u]) => String(u) === "/api/chat")
+      .map(([, init]) => JSON.parse(String(init?.body)))
+    expect(bodies[0].collection_ids).toEqual(["k1"])
+    expect(bodies[1]).toEqual({
+      question: "Second",
+      collection_ids: ["k1"],
+      conversation_id: "c1",
+    })
+  })
+
+  it("stops waiting when the stream ends without done or error", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input) === "/api/collections") return jsonResponse([])
+      return sse(
+        ["meta", { conversation_id: "c1", user_message_id: "u1" }],
+        ["token", { text: "Partial" }]
+      )
+    })
+    renderWithProviders(<ChatPanel conversationId="c1" initialMessages={[]} />)
+    const box = screen.getByPlaceholderText("Ask a question")
+    await userEvent.type(box, "Hi{Enter}")
+    await waitFor(() => expect(box).not.toBeDisabled())
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull()
+    expect(screen.queryByLabelText("Thinking")).toBeNull()
+  })
+
+  it("refetches an observed conversation instead of removing it", async () => {
+    let conversationFetches = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url === "/api/collections") return jsonResponse([])
+      if (url === "/api/conversations/c1") {
+        conversationFetches++
+        return jsonResponse({ id: "c1", messages: [] })
+      }
+      return sse(
+        ["meta", { conversation_id: "c1", user_message_id: "u1" }],
+        done("Fresh.")
+      )
+    })
+    function Observer() {
+      useQuery({
+        queryKey: ["conversation", "c1"],
+        queryFn: () => api.conversation("c1"),
+      })
+      return null
+    }
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    renderWithProviders(
+      <>
+        <Observer />
+        <ChatPanel conversationId="c1" initialMessages={[]} />
+      </>,
+      client
+    )
+    await waitFor(() => expect(conversationFetches).toBe(1))
+    await userEvent.type(
+      screen.getByPlaceholderText("Ask a question"),
+      "Again{Enter}"
+    )
+    expect(await screen.findByText("Fresh.")).toBeInTheDocument()
+    await waitFor(() => expect(conversationFetches).toBe(2))
+    expect(client.getQueryData(["conversation", "c1"])).toBeDefined()
   })
 })

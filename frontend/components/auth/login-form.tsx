@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 
@@ -46,6 +46,23 @@ export function safeNext(next: string | undefined): string {
 export function LoginForm({ next }: { next?: string }) {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
+  // Already signed in (e.g. arriving from a cross-site link, where the SameSite=Strict cookie
+  // wasn't sent): skip the form. Called directly so a 401 never reaches the global handler.
+  useEffect(() => {
+    let cancelled = false
+    api
+      .me()
+      .then((user) => {
+        if (cancelled) return
+        router.replace(
+          user.must_change_password ? "/change-password" : safeNext(next)
+        )
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [router, next])
   const form = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: { username: "", password: "" },

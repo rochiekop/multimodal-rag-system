@@ -34,7 +34,11 @@ export function FeedbackButtons({
     onSuccess: (_, { value }) => {
       setRating(value)
       // Cached transcripts carry the old rating.
-      queryClient.removeQueries({ queryKey: ["conversation"] })
+      queryClient.removeQueries({
+        queryKey: ["conversation"],
+        type: "inactive",
+      })
+      void queryClient.invalidateQueries({ queryKey: ["conversation"] })
       setOpen(false)
       toast.success("Thanks for the feedback")
     },

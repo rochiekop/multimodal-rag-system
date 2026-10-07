@@ -3,6 +3,10 @@
 import { useRouter } from "next/navigation"
 import { useCallback, useState } from "react"
 
+import {
+  NEW_CHAT_KEY,
+  useMoveCollectionSelection,
+} from "@/components/chat/collection-selection"
 import { Composer } from "@/components/chat/composer"
 import { MessageList } from "@/components/chat/message-list"
 import { SourceViewer } from "@/components/chat/source-viewer"
@@ -19,10 +23,15 @@ export function ChatPanel({
   initialMessages: Message[]
 }) {
   const router = useRouter()
-  // A new chat moves to its conversation URL once the first answer is complete.
+  const moveSelection = useMoveCollectionSelection()
+  // A new chat moves to its conversation URL once the first answer is complete,
+  // keeping the collections picked for it.
   const onStarted = useCallback(
-    (id: string) => router.replace(`/app/c/${id}`),
-    [router]
+    (id: string) => {
+      moveSelection(NEW_CHAT_KEY, id)
+      router.replace(`/app/c/${id}`)
+    },
+    [router, moveSelection]
   )
   const chat = useChat(
     conversationId,
@@ -46,6 +55,7 @@ export function ChatPanel({
         )}
       </ScrollArea>
       <Composer
+        selectionKey={conversationId ?? NEW_CHAT_KEY}
         streaming={chat.streaming}
         onAsk={chat.ask}
         onStop={chat.stop}

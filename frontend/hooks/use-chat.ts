@@ -46,6 +46,7 @@ export function useChat(
       const controller = new AbortController()
       abortRef.current = controller
       let started: string | null = null
+      let finished = false
       try {
         const body = {
           question,
@@ -57,11 +58,15 @@ export function useChat(
         for await (const event of streamChat(body, controller.signal)) {
           if (!mountedRef.current) break
           dispatch({ type: "event", event, tempId })
+          if (event.event === "done" || event.event === "error") finished = true
           if (event.event === "meta" && !conversationRef.current) {
             started = event.data.conversation_id
             conversationRef.current = started
           }
         }
+        // A stream that ends without done/error must not leave the answer spinning.
+        if (!finished && mountedRef.current)
+          dispatch({ type: "stopped", tempId })
       } catch (err) {
         if (!mountedRef.current) return
         if (controller.signal.aborted) dispatch({ type: "stopped", tempId })
@@ -81,9 +86,14 @@ export function useChat(
       } finally {
         abortRef.current = null
         void queryClient.invalidateQueries({ queryKey: ["conversations"] })
-        // The cached transcript is now stale; the next visit must load fresh.
+        // The cached transcript is now stale; the next visit must load fresh. An observed
+        // query is refetched in place rather than removed out from under its view.
         const id = started ?? conversationRef.current
-        if (id) queryClient.removeQueries({ queryKey: ["conversation", id] })
+        if (id) {
+          const queryKey = ["conversation", id]
+          queryClient.removeQueries({ queryKey, type: "inactive" })
+          void queryClient.invalidateQueries({ queryKey })
+        }
         if (started && mountedRef.current) onStarted?.(started)
       }
     },

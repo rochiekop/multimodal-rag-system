@@ -4,20 +4,24 @@ import { ArrowUpIcon, SquareIcon } from "lucide-react"
 import { useState } from "react"
 
 import { CollectionPicker } from "@/components/chat/collection-picker"
+import { useCollectionSelection } from "@/components/chat/collection-selection"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 
 export function Composer({
+  selectionKey,
   streaming,
   onAsk,
   onStop,
 }: {
+  /** Conversation id, or "new" for a chat that hasn't started. */
+  selectionKey: string
   streaming: boolean
   onAsk: (question: string, collectionIds: string[]) => void
   onStop: () => void
 }) {
   const [text, setText] = useState("")
-  const [collections, setCollections] = useState<string[]>([])
+  const [collections, setCollections] = useCollectionSelection(selectionKey)
 
   function submit() {
     const question = text.trim()

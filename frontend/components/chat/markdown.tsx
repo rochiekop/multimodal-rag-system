@@ -37,6 +37,17 @@ export function Markdown({
               </a>
             )
           },
+          // Never load remote images: a prompt-injected ![](https://…?q=secret) would be
+          // fetched with no click. Show a link the user can choose to open instead.
+          img({ src, alt }) {
+            if (typeof src === "string" && /^https?:\/\//i.test(src))
+              return (
+                <a href={src} target="_blank" rel="noreferrer noopener">
+                  {alt || "image"}
+                </a>
+              )
+            return <>{alt}</>
+          },
         }}
       >
         {linkCitations(content, new Set(byNumber.keys()))}
