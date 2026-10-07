@@ -100,5 +100,5 @@ async def test_cost_alert_notifies_admins_once_per_day(
 
 async def test_rate_limiter_fails_open_when_redis_is_down() -> None:
     limiter = RateLimiter(Redis.from_url("redis://127.0.0.1:1/0", socket_connect_timeout=0.2))
-    assert await limiter.hit("user:x", limit=1) is True
+    assert await limiter.hit("user:x", limit=0) is True
     await limiter.redis.aclose()

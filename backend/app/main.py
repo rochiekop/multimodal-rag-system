@@ -81,7 +81,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.embedding_dimensions,
     )
     app.state.chat_deps = _chat_deps(settings, app.state.index)
-    app.state.rate_limiter = RateLimiter(Redis.from_url(settings.redis_url))
+    app.state.rate_limiter = RateLimiter(
+        Redis.from_url(settings.redis_url, socket_connect_timeout=1, socket_timeout=1)
+    )
     app.state.enqueue = _enqueue_with_celery
     app.add_middleware(RequestIdMiddleware)
     app.include_router(api_router)
