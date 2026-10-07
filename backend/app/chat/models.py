@@ -11,6 +11,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
+    false,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -55,7 +56,10 @@ class Message(Base):
     collection_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
     sources: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
     citations: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
-    outcome: Mapped[str | None] = mapped_column(String(20))  # answered | not_found | error
+    # answered | not_found | blocked | support | off_topic | error | cancelled
+    outcome: Mapped[str | None] = mapped_column(String(20))
+    low_confidence: Mapped[bool] = mapped_column(default=False, server_default=false())
+    guardrail: Mapped[dict[str, Any] | None] = mapped_column(JSONB)  # decisive check + flags
     top_score: Mapped[float | None]
     latency_ms: Mapped[int | None]
     input_tokens: Mapped[int] = mapped_column(default=0)

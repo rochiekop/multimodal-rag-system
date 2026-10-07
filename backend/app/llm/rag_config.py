@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import service as audit
+from app.guardrails.settings import GuardrailSettings
 from app.llm.models import RagConfigVersion
 from app.users.models import User
 
@@ -56,6 +57,7 @@ class RagConfig(BaseModel):
 
     chat_model: str = Field(default="gpt-5-mini", min_length=1, max_length=100)
     rewrite_model: str = Field(default="gpt-5-nano", min_length=1, max_length=100)
+    fallback_model: str | None = Field(default=None, min_length=1, max_length=100)
     reranker_model: RerankerModel = "Xenova/ms-marco-MiniLM-L-12-v2"
     search_top_k: int = Field(default=50, ge=1, le=200)
     rerank_top_n: int = Field(default=8, ge=1, le=30)
@@ -67,6 +69,7 @@ class RagConfig(BaseModel):
         default="I couldn't find this in the available documents.", min_length=1, max_length=500
     )
     prices: dict[str, ModelPrice] = Field(default_factory=_default_prices)
+    guardrails: GuardrailSettings = Field(default_factory=GuardrailSettings)
 
 
 class RagConfigCreate(BaseModel):

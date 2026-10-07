@@ -50,6 +50,10 @@ class User(Base):
     must_change_password: Mapped[bool] = mapped_column(default=True)
     failed_login_count: Mapped[int] = mapped_column(default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Chat lock from guardrail strikes (separate from the login lockout above).
+    chat_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Strikes before this moment no longer count (set on lock and on admin unlock).
+    strike_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Incremented to revoke every token issued before it (deactivation, role/password change).
     token_version: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
