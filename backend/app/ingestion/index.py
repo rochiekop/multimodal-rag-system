@@ -35,6 +35,12 @@ class IndexedChunk:
     payload: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class SearchHit:
+    score: float
+    payload: dict[str, Any]
+
+
 class ChunkIndex:
     def __init__(self, client: AsyncQdrantClient, collection: str, dimensions: int) -> None:
         self.client = client
@@ -142,3 +148,46 @@ class ChunkIndex:
             self.collection, count_filter=_match("version_id", str(version_id)), exact=True
         )
         return result.count
+
+    async def search(
+        self,
+        dense: list[float],
+        sparse: SparseVector,
+        *,
+        access_groups: list[str],
+        collection_ids: list[str],
+        limit: int,
+    ) -> list[SearchHit]:
+        """Hybrid search: dense and BM25 candidates fused with RRF, pre-filtered by the
+        caller's groups and collections. Callers must still re-check hits in Postgres."""
+        await self.ensure_collection()
+        allowed = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="access_groups", match=models.MatchAny(any=access_groups)
+                ),
+                models.FieldCondition(
+                    key="collection_id", match=models.MatchAny(any=collection_ids)
+                ),
+                models.FieldCondition(key="deleted", match=models.MatchValue(value=False)),
+            ]
+        )
+        prefetch = [models.Prefetch(query=dense, using=DENSE, filter=allowed, limit=limit)]
+        if sparse.indices:  # a query of only stop-words has no BM25 terms
+            prefetch.append(
+                models.Prefetch(
+                    query=models.SparseVector(indices=sparse.indices, values=sparse.values),
+                    using=SPARSE,
+                    filter=allowed,
+                    limit=limit,
+                )
+            )
+        response = await self.client.query_points(
+            self.collection,
+            prefetch=prefetch,
+            query=models.FusionQuery(fusion=models.Fusion.RRF),
+            query_filter=allowed,
+            limit=limit,
+            with_payload=True,
+        )
+        return [SearchHit(score=p.score, payload=dict(p.payload or {})) for p in response.points]
