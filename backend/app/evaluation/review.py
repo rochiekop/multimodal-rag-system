@@ -150,12 +150,24 @@ async def _assistant_message(session: AsyncSession, message_id: uuid.UUID) -> Me
     return message
 
 
+def _matches_kind(message: Message, kind: Kind) -> bool:
+    if message.role != "assistant":
+        return False
+    if kind == "feedback":
+        return message.feedback_rating == -1
+    return bool(message.low_confidence)
+
+
 async def mark_reviewed(session: AsyncSession, actor: User, kind: Kind, item_id: uuid.UUID) -> None:
     target: Message | GuardrailEvent | None
     if kind == "guardrail":
         target = await session.get(GuardrailEvent, item_id)
     else:
+        # One reviewed_at per message: an answer reviewed for one reason counts as reviewed for
+        # both (the audit row records which kind was clicked).
         target = await session.get(Message, item_id)
+        if target is not None and not _matches_kind(target, kind):
+            target = None
     if target is None:
         raise evaluation.NotFound("Review item not found")
     target.reviewed_at = datetime.now(UTC)

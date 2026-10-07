@@ -174,3 +174,50 @@ async def test_preflight_refusals_are_recorded_once_per_hour(
         .where(GuardrailEvent.check == "question_too_long")
     )
     assert count == 1
+
+
+async def test_mark_reviewed_validates_target_and_audits(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    import uuid
+
+    alice, _, disliked, shaky, h = await _world(client, session)
+    url = "/api/admin/review-queue"
+    wrong_kind = await client.post(f"{url}/low_confidence/{disliked.id}/reviewed", headers=h)
+    assert wrong_kind.status_code == 404
+    wrong_kind = await client.post(f"{url}/feedback/{shaky.id}/reviewed", headers=h)
+    assert wrong_kind.status_code == 404
+    user_msg = await session.scalar(
+        select(Message.id).where(
+            Message.conversation_id == disliked.conversation_id, Message.role == "user"
+        )
+    )
+    assert (await client.post(f"{url}/feedback/{user_msg}/reviewed", headers=h)).status_code == 404
+    unknown = await client.post(f"{url}/feedback/{uuid.uuid4()}/reviewed", headers=h)
+    assert unknown.status_code == 404
+    assert "review.marked_reviewed" not in (await session.scalars(select(AuditLog.action))).all()
+
+    assert (
+        await client.post(f"{url}/feedback/{disliked.id}/reviewed", headers=h)
+    ).status_code == 204
+    assert "review.marked_reviewed" in (await session.scalars(select(AuditLog.action))).all()
+
+    event_id = await session.scalar(select(GuardrailEvent.id))
+    done = await client.post(f"{url}/guardrail/{event_id}/reviewed", headers=h)
+    assert done.status_code == 204
+    kinds = [i["kind"] for i in (await client.get(url, headers=h)).json()]
+    assert "guardrail" not in kinds
+
+
+async def test_add_to_eval_set_is_audited(client: AsyncClient, session: AsyncSession) -> None:
+    _, _, disliked, _, h = await _world(client, session)
+    eval_set = EvalSet(name="Audited")
+    session.add(eval_set)
+    await session.commit()
+    response = await client.post(
+        f"/api/admin/review-queue/messages/{disliked.id}/add-to-eval-set",
+        headers=h,
+        json={"eval_set_id": str(eval_set.id)},
+    )
+    assert response.status_code == 201
+    assert "review.added_to_eval_set" in (await session.scalars(select(AuditLog.action))).all()
