@@ -2,6 +2,7 @@
 feedback and the page images the source viewer shows."""
 
 import asyncio
+import contextlib
 import json
 import logging
 import uuid
@@ -42,6 +43,18 @@ def _sse(event: ChatEvent) -> str:
     return f"event: {event.event}\ndata: {json.dumps(event.data, ensure_ascii=False)}\n\n"
 
 
+async def sse_events(events: AsyncIterator[ChatEvent]) -> AsyncIterator[str]:
+    """Events as SSE text. Closing this closes `events` too, so a client that disconnects
+    still runs the answer's save instead of waiting for garbage collection."""
+    try:
+        async with contextlib.aclosing(events):
+            async for event in events:
+                yield _sse(event)
+    except Exception:
+        logger.exception("Answer stream failed")
+        yield _sse(ChatEvent("error", {"code": "answer_failed", "message": ERROR_MESSAGE}))
+
+
 @router.get("/collections")
 async def list_collections(user: CurrentUser, session: SessionDep) -> list[VisibleCollectionOut]:
     return [
@@ -78,16 +91,8 @@ async def chat(
         collection_ids=body.collection_ids,
     )
 
-    async def stream() -> AsyncIterator[str]:
-        try:
-            async for event in events:
-                yield _sse(event)
-        except Exception:
-            logger.exception("Answer stream failed")
-            yield _sse(ChatEvent("error", {"code": "answer_failed", "message": ERROR_MESSAGE}))
-
     return StreamingResponse(
-        stream(),
+        sse_events(events),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

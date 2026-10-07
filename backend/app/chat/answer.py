@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import anyio
+import tiktoken
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
@@ -36,6 +37,8 @@ from app.users.models import User
 logger = logging.getLogger(__name__)
 ERROR_MESSAGE = "Something went wrong while answering. Please try again."
 CLOSEST_MATCHES = 3
+_ENCODING = tiktoken.get_encoding("cl100k_base")
+_KEPT_OUTCOMES = {"answered", "not_found"}
 _DECISION_OUTCOME = {"block": "blocked", "support": "support", "off_topic": "off_topic"}
 _EVENT_ACTION = {"block": "blocked", "support": "support", "off_topic": "redirected"}
 
@@ -78,21 +81,23 @@ class _Result:
     low_confidence: bool = False
     decision: InputDecision | None = None  # the check that stopped the answer, if any
     flags: list[tuple[str, str | None]] = field(default_factory=list)
+    prompt_text: str | None = None  # set once generation starts, for the usage estimate
+    generated: str = ""  # everything the model produced, released or held back
 
 
 async def _history(session: AsyncSession, conversation_id: uuid.UUID, turns: int) -> list[Message]:
+    """The last `turns` complete (question, answer) pairs whose answer was a real reply.
+    Blocked, errored or cancelled turns stay out so they can't steer the rewrite model."""
     if turns == 0:
         return []
-    query = (
-        select(Message)
-        .where(
-            Message.conversation_id == conversation_id,
-            Message.outcome.is_distinct_from("error"),
-        )
-        .order_by(Message.seq.desc())
-        .limit(turns * 2)
-    )
-    return list(reversed((await session.scalars(query)).all()))
+    query = select(Message).where(Message.conversation_id == conversation_id).order_by(Message.seq)
+    messages = (await session.scalars(query)).all()
+    pairs = [
+        [user, reply]
+        for user, reply in zip(messages, messages[1:], strict=False)
+        if user.role == "user" and reply.role == "assistant" and reply.outcome in _KEPT_OUTCOMES
+    ]
+    return [m for pair in pairs[-turns:] for m in pair]
 
 
 def _model(deps: ChatDeps, config: RagConfig, name: str) -> Runnable:
@@ -118,12 +123,16 @@ async def _rewrite(
     return content_text(response.content).strip() or question
 
 
+def _sources_message(chunks: list[RetrievedChunk], question: str) -> str:
+    return f"Sources:\n\n{format_sources(chunks)}\n\nQuestion: {question}"
+
+
 async def _generate(
     deps: ChatDeps, config: RagConfig, chunks: list[RetrievedChunk], question: str, usage: _Usage
 ) -> AsyncIterator[str]:
     messages = [
         SystemMessage(config.system_prompt),
-        HumanMessage(f"Sources:\n\n{format_sources(chunks)}\n\nQuestion: {question}"),
+        HumanMessage(_sources_message(chunks, question)),
     ]
     async for chunk in _model(deps, config, config.chat_model).astream(messages):
         usage.add(config.chat_model, getattr(chunk, "usage_metadata", None))
@@ -191,13 +200,24 @@ async def _run(
         sources_text="\n".join(c.text for c in chunks),
         system_prompt=config.system_prompt,
     )
+    result.prompt_text = f"{config.system_prompt}\n{_sources_message(chunks, result.standalone)}"
+    flagged = 0
+
+    def note_redactions() -> None:
+        nonlocal flagged
+        result.flags.extend(("pii", name) for name in guard.redactions[flagged:])
+        flagged = len(guard.redactions)
+
     try:
         async for delta in _generate(deps, config, chunks, result.standalone, usage):
+            result.generated += delta
             safe = guard.feed(delta)
+            note_redactions()
             result.content = guard.text
             if safe:
                 yield ChatEvent("token", {"text": safe})
         tail = guard.finish()
+        note_redactions()
         result.content = guard.text
         if tail:
             yield ChatEvent("token", {"text": tail})
@@ -205,7 +225,6 @@ async def _run(
         result.decision = InputDecision("block", check="system_prompt_leak")
         result.outcome, result.content = "blocked", settings.blocked_message
         return
-    result.flags.extend(("pii", name) for name in guard.redactions)
 
     content, used = clean_citations(guard.text, len(chunks))
     result.content = content
@@ -245,6 +264,12 @@ async def _save(
     started: float,
 ) -> tuple[Message, guardrails.StrikeResult | None]:
     settings = config.guardrails
+    if result.prompt_text is not None and config.chat_model not in usage.tokens:
+        # The provider reports usage on the last chunk only, so an interrupted stream has none.
+        usage.tokens[config.chat_model] = [
+            len(_ENCODING.encode(result.prompt_text, disallowed_special=())),
+            len(_ENCODING.encode(result.generated, disallowed_special=())),
+        ]
     async with sessionmaker() as session:
         input_tokens = sum(t[0] for t in usage.tokens.values())
         output_tokens = sum(t[1] for t in usage.tokens.values())

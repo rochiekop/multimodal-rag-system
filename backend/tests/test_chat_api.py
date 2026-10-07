@@ -1,4 +1,5 @@
 import json
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
 import pytest
@@ -6,6 +7,8 @@ from fastapi import FastAPI
 from httpx import AsyncClient, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.chat import sse_events
+from app.chat.answer import ChatEvent
 from app.documents.models import Document
 from app.documents.service import page_key
 from tests.factories import (
@@ -170,3 +173,20 @@ async def test_stream_ends_with_error_event_when_answer_fails(
     events = await _ask(client, alice, question="How many leave days?")
     assert events[-1][0] == "error"
     assert events[-1][1]["code"] == "answer_failed"
+
+
+async def test_closing_the_sse_stream_closes_the_answer_generator() -> None:
+    closed = False
+
+    async def events() -> AsyncIterator[ChatEvent]:
+        nonlocal closed
+        try:
+            while True:
+                yield ChatEvent("token", {"text": "x"})
+        finally:
+            closed = True
+
+    stream = sse_events(events())
+    await anext(stream)
+    await stream.aclose()
+    assert closed
