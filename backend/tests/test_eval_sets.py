@@ -149,3 +149,24 @@ async def test_csv_import_survives_rows_with_extra_columns(
     assert body["created"] == 1
     assert [e["row"] for e in body["errors"]] == [3]
     assert "more columns" in body["errors"][0]["message"]
+
+
+async def test_csv_import_header_names_ignore_case(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    h = await _admin(client, session)
+    await make_group(session, "hr")
+    set_id = await _set(client, h)
+    csv_text = (
+        " Question ,Expected_Answer,GROUPS,Unanswerable\nHow many leave days?,25 days,hr,no\n"
+    )
+    response = await client.post(
+        f"/api/admin/eval-sets/{set_id}/import",
+        headers=h,
+        files={"file": ("cases.csv", csv_text.encode("utf-8"), "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"created": 1, "errors": []}
+    cases = (await client.get(f"/api/admin/eval-sets/{set_id}/cases", headers=h)).json()
+    assert cases[0]["question"] == "How many leave days?"
+    assert cases[0]["expected_answer"] == "25 days" and len(cases[0]["run_as_group_ids"]) == 1

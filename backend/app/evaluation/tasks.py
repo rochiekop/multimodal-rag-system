@@ -1,4 +1,5 @@
-"""Celery task for eval runs, on its own queue so long runs never delay ingestion."""
+"""Celery task for eval runs, on its own queue served by its own worker (`worker-eval` in
+deploy/docker-compose.yml) so long runs never delay ingestion."""
 
 import asyncio
 import uuid
@@ -35,7 +36,9 @@ async def _run(run_id: uuid.UUID) -> None:
         await engine.dispose()
 
 
-@celery_app.task(name="evaluation.run_eval")
+# acks_late=False (the app default is True): a run can outlast the broker's visibility timeout,
+# and a redelivered copy must not start it again. execute_run also skips a run it can't claim.
+@celery_app.task(name="evaluation.run_eval", acks_late=False)
 def run_eval(run_id: str) -> None:
     asyncio.run(_run(uuid.UUID(run_id)))
 

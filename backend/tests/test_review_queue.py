@@ -110,6 +110,23 @@ async def test_queue_lists_feedback_low_confidence_and_guardrail_items(
     assert "review.queue_viewed" in actions
 
 
+async def test_queue_view_audit_records_whose_content_was_shown(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    alice, _, disliked, _, h = await _world(client, session)
+    items = (await client.get("/api/admin/review-queue", headers=h)).json()
+    assert len(items) == 3
+    entry = await session.scalar(select(AuditLog).where(AuditLog.action == "review.queue_viewed"))
+    assert entry is not None
+    shown = entry.detail["items"]
+    assert {i["user_id"] for i in shown} == {str(alice.id)}
+    assert sorted((i["kind"], i["id"]) for i in shown) == sorted(
+        (i["kind"], i["id"]) for i in items
+    )
+    feedback = next(i for i in shown if i["kind"] == "feedback")
+    assert feedback["message_id"] == str(disliked.id)
+
+
 async def test_viewing_a_message_is_audited(client: AsyncClient, session: AsyncSession) -> None:
     alice, _, disliked, _, h = await _world(client, session)
     detail = await client.get(f"/api/admin/review-queue/messages/{disliked.id}", headers=h)

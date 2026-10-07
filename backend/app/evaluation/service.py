@@ -221,7 +221,7 @@ async def import_csv(session: AsyncSession, eval_set: EvalSet, text: str) -> Imp
     groups = {g.name.lower(): g.id for g in (await session.scalars(select(Group))).all()}
     collections = {c.name.lower(): c.id for c in (await session.scalars(select(Collection))).all()}
     reader = csv.DictReader(io.StringIO(text.removeprefix("﻿")))
-    if not reader.fieldnames or "question" not in [f.strip() for f in reader.fieldnames]:
+    if not reader.fieldnames or "question" not in [f.strip().lower() for f in reader.fieldnames]:
         raise InvalidCase("The CSV needs a header row with at least a 'question' column")
     created, errors = 0, []
     for index, raw in enumerate(reader):
@@ -238,7 +238,7 @@ async def import_csv(session: AsyncSession, eval_set: EvalSet, text: str) -> Imp
                 )
             )
             continue
-        row = {(k or "").strip(): (v or "").strip() for k, v in raw.items()}
+        row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items()}
         if not any(row.values()):
             continue  # blank line
         try:

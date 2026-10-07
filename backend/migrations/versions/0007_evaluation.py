@@ -128,6 +128,7 @@ def upgrade() -> None:
             ondelete="SET NULL",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_eval_results")),
+        sa.UniqueConstraint("run_id", "case_id", name=op.f("uq_eval_results_run_id_case_id")),
     )
     op.create_index(op.f("ix_eval_results_run_id"), "eval_results", ["run_id"])
     op.add_column("messages", sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=True))

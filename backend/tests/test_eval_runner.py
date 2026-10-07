@@ -2,6 +2,7 @@ import uuid
 from types import SimpleNamespace
 from typing import Any
 
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -10,7 +11,7 @@ from app.chat.models import Conversation, Message
 from app.core.config import Settings
 from app.core.db import create_sessionmaker
 from app.evaluation.models import EvalCase
-from app.evaluation.runner import deterministic_metrics, is_refusal, run_case
+from app.evaluation.runner import deterministic_metrics, run_case
 from app.evaluation.scoring import RagasScorer, ScoreInput, build_ragas_scorer
 from app.guardrails.models import GuardrailEvent, UsageRecord
 from app.ingestion.index import ChunkIndex
@@ -79,23 +80,69 @@ async def test_run_case_respects_run_as_groups(
     assert deterministic_metrics(case, insider)["hit_rate"] == 1.0
 
 
-def test_refusal_and_idk_metrics() -> None:
+def test_idk_and_answered_metrics() -> None:
     answered = SimpleNamespace(outcome="answered", citations=[{"n": 1}], sources=[])
     uncited = SimpleNamespace(outcome="answered", citations=[], sources=[])
     not_found = SimpleNamespace(outcome="not_found", citations=[], sources=[])
-    assert not is_refusal("answered", [{"n": 1}])
-    assert is_refusal("answered", []) and is_refusal("not_found", [])
+    blocked = SimpleNamespace(outcome="blocked", citations=[], sources=[])
 
     answerable = EvalCase(question="q", unanswerable=False, expected_sources=[])
     unanswerable = EvalCase(question="q", unanswerable=True, expected_sources=[])
-    assert deterministic_metrics(answerable, answered) == {"hit_rate": None, "idk_correct": 1.0}
-    assert deterministic_metrics(answerable, uncited)["idk_correct"] == 0.0
+    # "I don't know" accuracy is measured on unanswerable cases only.
+    assert deterministic_metrics(answerable, answered) == {
+        "hit_rate": None,
+        "idk_correct": None,
+        "answered": 1.0,
+    }
+    for outcome in (uncited, not_found, blocked):
+        metrics = deterministic_metrics(answerable, outcome)
+        assert (metrics["answered"], metrics["idk_correct"]) == (0.0, None)
     assert deterministic_metrics(unanswerable, not_found)["idk_correct"] == 1.0
-    assert deterministic_metrics(unanswerable, answered)["idk_correct"] == 0.0
+    assert deterministic_metrics(unanswerable, blocked)["idk_correct"] == 1.0
+    assert deterministic_metrics(unanswerable, uncited)["idk_correct"] == 1.0
+    assert deterministic_metrics(unanswerable, answered) == {
+        "hit_rate": None,
+        "idk_correct": 0.0,
+        "answered": None,
+    }
 
     errored = SimpleNamespace(outcome="error", citations=[], sources=[])
     with_sources = EvalCase(question="q", unanswerable=False, expected_sources=[{"doc_id": "d"}])
-    assert deterministic_metrics(with_sources, errored) == {"hit_rate": None, "idk_correct": None}
+    assert deterministic_metrics(with_sources, errored) == {
+        "hit_rate": None,
+        "idk_correct": None,
+        "answered": None,
+    }
+
+
+async def test_answerable_case_blocked_by_guardrails_is_not_answered(
+    engine: AsyncEngine, session: AsyncSession, chunk_index: ChunkIndex
+) -> None:
+    hr, _, _, _ = await _world(session, chunk_index)
+    case = EvalCase(question="How many leave days?", run_as_group_ids=[str(hr.id)])
+    config = RagConfig.model_validate(
+        {
+            "guardrails": {
+                "classifier_model": "blocker",
+                "user_daily_cost_usd": 0,
+                "installation_daily_cost_usd": 0,
+            }
+        }
+    )
+    blocker = FakeListChatModel(
+        responses=['{"prompt_injection": true, "exfiltration": false, "off_topic": false}']
+    )
+    outcome = await run_case(
+        create_sessionmaker(engine),
+        chat_deps(chunk_index, models={"blocker": blocker}),
+        config,
+        case,
+        [hr],
+        run_id=uuid.uuid4(),
+    )
+    assert outcome.outcome == "blocked"
+    metrics = deterministic_metrics(case, outcome)
+    assert (metrics["answered"], metrics["idk_correct"]) == (0.0, None)
 
 
 class _Metric:

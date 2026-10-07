@@ -40,7 +40,7 @@ dev = [
 
 [tool.uv]
 package = false
-override-dependencies = ["jiter>=0.17.0", "openai>=3.24.0"]
+override-dependencies = ["jiter>=0.17.0", "openai>=3.24.0,<4"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

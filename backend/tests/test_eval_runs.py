@@ -2,7 +2,8 @@ import uuid
 
 from fastapi import FastAPI
 from httpx import AsyncClient
-from sqlalchemy import select
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.db import create_sessionmaker
@@ -90,13 +91,16 @@ async def test_run_executes_scores_and_summarizes(
     by_question = {r.question: r for r in results}
     leave = by_question["How many leave days?"]
     assert leave.outcome == "answered"
-    assert leave.metrics["hit_rate"] == 1.0 and leave.metrics["idk_correct"] == 1.0
+    assert leave.metrics["hit_rate"] == 1.0 and leave.metrics["answered"] == 1.0
+    assert leave.metrics["idk_correct"] is None  # answerable: no "I don't know" score
     assert leave.metrics["faithfulness"] == 0.9
     salary = by_question["What is the CEO's salary?"]
     assert salary.outcome == "not_found" and salary.metrics["idk_correct"] == 1.0
+    assert salary.metrics["answered"] is None
     summary = run.summary
     assert summary["cases"] == 2 and summary["errors"] == 0
-    assert summary["idk_accuracy"] == 1.0 and summary["metrics"]["faithfulness"] == 0.9
+    assert summary["idk_accuracy"] == 1.0 and summary["answered_rate"] == 1.0
+    assert summary["metrics"]["faithfulness"] == 0.9
     assert summary["metrics"]["hit_rate"] == 1.0
     assert summary["latency_p50_ms"] >= 0 and "score" in summary
     # Both non-error cases reach the scorer; only the answered one gets answer metrics.
@@ -146,11 +150,103 @@ async def test_run_uses_the_chosen_config_and_compare_flags_regressions(
     leave = next(q for q in report["questions"] if q["question"] == "How many leave days?")
     assert leave["a"]["outcome"] == "answered" and leave["b"]["outcome"] == "not_found"
     assert leave["regressed"] is True
-    assert "hit_rate" in " ".join(leave["reasons"]) or "idk_correct" in " ".join(leave["reasons"])
-    assert report["deltas"]["score"] < 0  # brief asserted idk_accuracy < 0; it is 0.5 -> 0.5
+    assert "outcome answered → not_found" in leave["reasons"]
+    assert "answered 1.00 → 0.00" in leave["reasons"]
+    assert report["deltas"]["answered_rate"] == -1.0
+    assert report["deltas"]["score"] < 0
 
     latest = await runs.latest_scores(session, [strict.id])
     assert latest[strict.id]["run_id"] == str(bad.id)
+
+
+async def test_compare_flags_an_answer_that_guardrails_now_block(
+    engine: AsyncEngine, session: AsyncSession, chunk_index: ChunkIndex
+) -> None:
+    eval_set, _ = await _set(session, chunk_index)
+    root = await make_user(session, username="root", role=Role.SUPER_ADMIN)
+    blocking = await rag_config.create_version(
+        session,
+        root,
+        RagConfig.model_validate(
+            {
+                "guardrails": {
+                    "classifier_model": "blocker",
+                    "user_daily_cost_usd": 0,
+                    "installation_daily_cost_usd": 0,
+                }
+            }
+        ),
+    )
+    await session.commit()
+    good = await runs.create_run(session, root, eval_set.id)
+    bad = await runs.create_run(session, root, eval_set.id, rag_config_id=blocking.id)
+    await session.commit()
+    await _execute(engine, good, chat_deps(chunk_index), FakeScorer())
+    verdict = '{"prompt_injection": true, "exfiltration": false, "off_topic": false}'
+    blocker = FakeListChatModel(responses=[verdict])
+    await _execute(engine, bad, chat_deps(chunk_index, models={"blocker": blocker}), FakeScorer())
+
+    report = await runs.compare(session, good.id, bad.id)
+    leave = next(q for q in report["questions"] if q["question"] == "How many leave days?")
+    assert (leave["a"]["outcome"], leave["b"]["outcome"]) == ("answered", "blocked")
+    assert leave["b"]["metrics"]["answered"] == 0.0
+    assert leave["b"]["metrics"]["idk_correct"] is None
+    assert leave["regressed"] is True
+    assert "outcome answered → blocked" in leave["reasons"]
+
+
+async def test_a_run_executes_once(
+    engine: AsyncEngine, session: AsyncSession, chunk_index: ChunkIndex
+) -> None:
+    eval_set, _ = await _set(session, chunk_index)
+    boss = await make_user(session, username="boss", role=Role.ADMIN)
+    run = await runs.create_run(session, boss, eval_set.id)
+    await session.commit()
+    await _execute(engine, run, chat_deps(chunk_index), FakeScorer())
+    await session.refresh(run)
+    finished_at = run.finished_at
+
+    again = FakeScorer()  # a redelivered task: must not touch the finished run
+    await _execute(engine, run, chat_deps(chunk_index), again)
+    await session.refresh(run)
+    count = select(func.count()).select_from(EvalResult).where(EvalResult.run_id == run.id)
+    assert await session.scalar(count) == 2
+    assert (run.status, run.finished_at, again.items) == ("completed", finished_at, [])
+
+
+async def test_a_run_already_running_is_skipped(
+    engine: AsyncEngine, session: AsyncSession, chunk_index: ChunkIndex
+) -> None:
+    eval_set, _ = await _set(session, chunk_index)
+    boss = await make_user(session, username="boss", role=Role.ADMIN)
+    run = await runs.create_run(session, boss, eval_set.id)
+    run.status = "running"
+    await session.commit()
+    scorer = FakeScorer()
+    await _execute(engine, run, chat_deps(chunk_index), scorer)
+    await session.refresh(run)
+    assert (run.status, scorer.items) == ("running", [])
+    count = select(func.count()).select_from(EvalResult).where(EvalResult.run_id == run.id)
+    assert await session.scalar(count) == 0
+
+
+async def test_a_run_that_fails_to_load_is_marked_failed(
+    engine: AsyncEngine, session: AsyncSession, chunk_index: ChunkIndex
+) -> None:
+    eval_set, cases = await _set(session, chunk_index)
+    cases[0].run_as_group_ids = ["not-a-uuid"]
+    boss = await make_user(session, username="boss", role=Role.ADMIN)
+    run = await runs.create_run(session, boss, eval_set.id)
+    await session.commit()
+    await _execute(engine, run, chat_deps(chunk_index), FakeScorer())
+    await session.refresh(run)
+    assert run.status == "failed" and "ValueError" in (run.error or "")
+
+
+def test_eval_task_is_acked_early() -> None:
+    from app.evaluation.tasks import run_eval
+
+    assert run_eval.acks_late is False  # a long run must not be redelivered mid-flight
 
 
 async def test_runs_api(

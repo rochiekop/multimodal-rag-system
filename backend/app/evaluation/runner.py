@@ -34,11 +34,6 @@ class CaseOutcome:
     error: str | None = None
 
 
-def is_refusal(outcome: str, citations: list[dict[str, Any]]) -> bool:
-    """'I don't know': nothing found, or an answer that cites no source."""
-    return outcome == "not_found" or (outcome == "answered" and not citations)
-
-
 def deterministic_metrics(case: EvalCase, outcome: Any) -> dict[str, float | None]:
     hit_rate: float | None = None
     if case.expected_sources and outcome.outcome != "error":
@@ -49,12 +44,18 @@ def deterministic_metrics(case: EvalCase, outcome: Any) -> dict[str, float | Non
             for e in case.expected_sources
         )
         hit_rate = 1.0 if hit else 0.0
+    # A cited answer is the only "real" answer: refusals, guardrail blocks, support and
+    # off-topic replies all count as not answering. "I don't know" accuracy is measured on
+    # unanswerable cases only (spec §7.1); answerable cases measure whether they got answered.
     idk_correct: float | None = None
+    answered: float | None = None
     if outcome.outcome != "error":
-        idk_correct = (
-            1.0 if is_refusal(outcome.outcome, outcome.citations) == case.unanswerable else 0.0
-        )
-    return {"hit_rate": hit_rate, "idk_correct": idk_correct}
+        cited = outcome.outcome == "answered" and bool(outcome.citations)
+        if case.unanswerable:
+            idk_correct = 0.0 if cited else 1.0
+        else:
+            answered = 1.0 if cited else 0.0
+    return {"hit_rate": hit_rate, "idk_correct": idk_correct, "answered": answered}
 
 
 async def run_case(

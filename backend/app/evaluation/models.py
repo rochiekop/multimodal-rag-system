@@ -2,7 +2,17 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Identity, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    Float,
+    ForeignKey,
+    Identity,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -71,6 +81,8 @@ class EvalRun(Base):
 
 class EvalResult(Base):
     __tablename__ = "eval_results"
+    # One result per case per run: a duplicate execution cannot double-insert.
+    __table_args__ = (UniqueConstraint("run_id", "case_id", name="uq_eval_results_run_id_case_id"),)
     __mapper_args__ = {"eager_defaults": True}
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)

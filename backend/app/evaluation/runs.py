@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from statistics import mean
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.audit import service as audit
@@ -23,6 +23,9 @@ from app.users.models import Group, User
 
 logger = logging.getLogger(__name__)
 REGRESSION_DROP = 0.1
+# Per-case 0/1 metrics averaged into a summary rate: "I don't know" accuracy on unanswerable
+# cases, and the share of answerable cases that got a cited answer. Both feed the score.
+RATES = {"idk_accuracy": "idk_correct", "answered_rate": "answered"}
 
 
 async def create_run(
@@ -78,17 +81,19 @@ def _percentile(values: Sequence[int], fraction: float) -> int:
     return int(ordered[index])
 
 
+def _rate(results: Sequence[EvalResult], metric: str) -> float | None:
+    values = [r.metrics.get(metric) for r in results if r.metrics.get(metric) is not None]
+    return round(mean(float(v) for v in values), 4) if values else None
+
+
 def summarize(results: Sequence[EvalResult]) -> dict[str, Any]:
     metric_means: dict[str, float] = {}
     for name in METRICS:
         values = [r.metrics.get(name) for r in results if r.metrics.get(name) is not None]
         if values:
             metric_means[name] = round(mean(float(v) for v in values), 4)
-    idk = [
-        r.metrics.get("idk_correct") for r in results if r.metrics.get("idk_correct") is not None
-    ]
-    idk_accuracy = round(mean(float(v) for v in idk), 4) if idk else None
-    parts = list(metric_means.values()) + ([idk_accuracy] if idk_accuracy is not None else [])
+    rates = {key: _rate(results, metric) for key, metric in RATES.items()}
+    parts = list(metric_means.values()) + [v for v in rates.values() if v is not None]
     outcomes: dict[str, int] = {}
     for r in results:
         outcomes[r.outcome] = outcomes.get(r.outcome, 0) + 1
@@ -98,7 +103,7 @@ def summarize(results: Sequence[EvalResult]) -> dict[str, Any]:
         "errors": outcomes.get("error", 0),
         "outcomes": outcomes,
         "metrics": metric_means,
-        "idk_accuracy": idk_accuracy,
+        **rates,
         "latency_p50_ms": _percentile(latencies, 0.5),
         "latency_p95_ms": _percentile(latencies, 0.95),
         "cost_per_question_usd": round(mean(r.cost_usd for r in results), 6) if results else 0.0,
@@ -108,11 +113,23 @@ def summarize(results: Sequence[EvalResult]) -> dict[str, Any]:
 
 async def _load(
     sessionmaker: async_sessionmaker[AsyncSession], run_id: uuid.UUID
-) -> tuple[EvalRun, list[EvalCase], dict[str, Group]]:
+) -> tuple[EvalRun, list[EvalCase], dict[str, Group]] | None:
+    """Claim a queued run (queued -> running, atomically) and load what it needs. Returns None
+    when the run is gone or already claimed, so a redelivered task never runs it twice."""
     async with sessionmaker() as session:
+        claimed = await session.scalar(
+            update(EvalRun)
+            .where(EvalRun.id == run_id, EvalRun.status == "queued")
+            .values(status="running", started_at=datetime.now(UTC), error=None)
+            .returning(EvalRun.id)
+        )
+        if claimed is None:
+            logger.warning(
+                "Eval run %s is not queued (missing or already claimed); skipping", run_id
+            )
+            return None
         run = await session.get(EvalRun, run_id)
-        if run is None:
-            raise service.NotFound(f"Eval run {run_id} not found")
+        assert run is not None
         cases = list(
             (
                 await session.scalars(
@@ -128,10 +145,21 @@ async def _load(
             if group_ids
             else []
         )
-        await session.execute(delete(EvalResult).where(EvalResult.run_id == run_id))  # re-run
-        run.status, run.started_at, run.error = "running", datetime.now(UTC), None
+        await session.execute(delete(EvalResult).where(EvalResult.run_id == run_id))
         await session.commit()
         return run, cases, {str(g.id): g for g in groups}
+
+
+async def _fail(
+    sessionmaker: async_sessionmaker[AsyncSession], run_id: uuid.UUID, exc: Exception
+) -> None:
+    logger.error("Eval run %s failed", run_id, exc_info=exc)
+    async with sessionmaker() as session:
+        stored = await session.get(EvalRun, run_id)
+        if stored is not None:
+            stored.status, stored.finished_at = "failed", datetime.now(UTC)
+            stored.error = f"{type(exc).__name__}: {exc}"[:1000]
+            await session.commit()
 
 
 async def execute_run(
@@ -143,8 +171,16 @@ async def execute_run(
     concurrency: int = 4,
 ) -> None:
     """Run every case of the run's eval set and store results and a summary. A case that fails
-    is recorded as an error; only an infrastructure failure marks the whole run failed."""
-    run, cases, groups = await _load(sessionmaker, run_id)
+    is recorded as an error; only an infrastructure failure marks the whole run failed. A run
+    that is not queued (already running, finished or gone) is skipped."""
+    try:
+        loaded = await _load(sessionmaker, run_id)
+    except Exception as exc:
+        await _fail(sessionmaker, run_id, exc)
+        return
+    if loaded is None:
+        return
+    run, cases, groups = loaded
     try:
         config = RagConfig.model_validate(run.config)
         scorer = scorer_factory(config.eval_judge_model)
@@ -198,13 +234,7 @@ async def execute_run(
             stored.status, stored.finished_at = "completed", datetime.now(UTC)
             await session.commit()
     except Exception as exc:
-        logger.exception("Eval run %s failed", run_id)
-        async with sessionmaker() as session:
-            stored = await session.get(EvalRun, run_id)
-            if stored is not None:
-                stored.status, stored.finished_at = "failed", datetime.now(UTC)
-                stored.error = f"{type(exc).__name__}: {exc}"[:1000]
-                await session.commit()
+        await _fail(sessionmaker, run_id, exc)
 
 
 async def get_run(session: AsyncSession, run_id: uuid.UUID) -> tuple[EvalRun, list[EvalResult]]:
@@ -230,7 +260,9 @@ def _regression(a: EvalResult, b: EvalResult) -> list[str]:
     reasons = []
     if b.outcome == "error" and a.outcome != "error":
         reasons.append("now errors")
-    for name in (*METRICS, "idk_correct"):
+    if a.outcome == "answered" and b.outcome != "answered":
+        reasons.append(f"outcome answered → {b.outcome}")
+    for name in (*METRICS, *RATES.values()):
         before, after = a.metrics.get(name), b.metrics.get(name)
         if before is not None and after is not None and before - after >= REGRESSION_DROP:
             reasons.append(f"{name} {before:.2f} → {after:.2f}")
@@ -263,7 +295,7 @@ async def compare(session: AsyncSession, a_id: uuid.UUID, b_id: uuid.UUID) -> di
         for k in keys
         if k in run_a.summary.get("metrics", {}) and k in run_b.summary.get("metrics", {})
     }
-    for k in ("idk_accuracy", "score", "latency_p95_ms", "cost_per_question_usd"):
+    for k in (*RATES, "score", "latency_p95_ms", "cost_per_question_usd"):
         if run_a.summary.get(k) is not None and run_b.summary.get(k) is not None:
             deltas[k] = round(run_b.summary[k] - run_a.summary[k], 6)
     return {

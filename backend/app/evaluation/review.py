@@ -133,14 +133,29 @@ async def list_queue(
         else:
             items += await _message_items(session, k, include_reviewed, limit + offset)
     items.sort(key=lambda i: i.created_at, reverse=True)
+    page = items[offset : offset + limit]
     await audit.record(
         session,
         action="review.queue_viewed",
         actor=actor,
         target_type="review_queue",
-        detail={"kind": kind, "include_reviewed": include_reviewed, "offset": offset},
+        detail={
+            "kind": kind,
+            "include_reviewed": include_reviewed,
+            "offset": offset,
+            # Whose content the admin saw (spec §6.6).
+            "items": [
+                {
+                    "kind": i.kind,
+                    "id": str(i.id),
+                    "message_id": str(i.message_id) if i.message_id else None,
+                    "user_id": str(i.user_id),
+                }
+                for i in page
+            ],
+        },
     )
-    return items[offset : offset + limit]
+    return page
 
 
 async def _assistant_message(session: AsyncSession, message_id: uuid.UUID) -> Message:
