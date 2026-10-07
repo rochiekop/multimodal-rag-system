@@ -10,6 +10,7 @@ from app.core.security import hash_password
 from app.documents.access import effective_access_groups
 from app.documents.models import Collection, Document, DocumentStatus, DocumentVersion
 from app.ingestion.index import ChunkIndex, IndexedChunk
+from app.llm import rag_config
 from app.llm.rag_config import RagConfig
 from app.llm.sparse import embed_sparse_documents
 from app.retrieval.search import RetrievalDeps
@@ -176,3 +177,13 @@ def chat_deps(
         retrieval=RetrievalDeps(index=index, embed_query=embed or FakeEmbed(), rerank=rerank),
         chat_model=models.__getitem__,
     )
+
+
+async def activate_config(session: AsyncSession, **overrides: object) -> RagConfig:
+    """Create and activate a RagConfig version, e.g. activate_config(s, guardrails={...})."""
+    root = await make_user(session, username=f"root{uuid.uuid4().hex[:8]}", role=Role.SUPER_ADMIN)
+    config = RagConfig.model_validate(overrides)
+    row = await rag_config.create_version(session, root, config)
+    await rag_config.activate(session, root, row.id)
+    await session.commit()
+    return config

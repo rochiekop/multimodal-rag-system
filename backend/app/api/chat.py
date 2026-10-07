@@ -26,6 +26,8 @@ from app.chat.schemas import (
 )
 from app.core.storage import FileStore
 from app.documents.service import page_key
+from app.guardrails.limits import GuardrailRefusal, check_chat_allowed
+from app.llm.rag_config import get_active
 from app.retrieval.access import permitted_documents, visible_collections
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,14 @@ async def list_collections(user: CurrentUser, session: SessionDep) -> list[Visib
 async def chat(
     body: ChatRequest, user: CurrentUser, session: SessionDep, request: Request
 ) -> StreamingResponse:
+    _, config = await get_active(session)
+    try:
+        await check_chat_allowed(
+            session, request.app.state.rate_limiter, user, config.guardrails, body.question
+        )
+    except GuardrailRefusal as exc:
+        await session.commit()  # keep any cost-alert notification
+        raise api_error(exc.status, exc.code, exc.message) from None
     try:
         conversation = await service.start_or_get_conversation(
             session, user, body.conversation_id, body.question
