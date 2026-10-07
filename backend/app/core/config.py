@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     chunk_max_tokens: int = 500
     chunk_overlap_tokens: int = 50
 
+    phoenix_endpoint: str | None = None  # e.g. http://phoenix:6006/v1/traces
+    phoenix_project: str = "multimodal-rag"
+
     @field_validator("jwt_secret")
     @classmethod
     def _secret_long_enough(cls, value: SecretStr) -> SecretStr:

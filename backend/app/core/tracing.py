@@ -6,7 +6,26 @@ from contextlib import contextmanager
 
 from opentelemetry import trace
 
+from app.core.config import Settings
+
 _tracer = trace.get_tracer("rag")
+_configured = False
+
+
+def setup_tracing(settings: Settings) -> None:
+    """Send OpenTelemetry traces (including LangChain auto-instrumentation) to Phoenix."""
+    global _configured
+    if _configured or not settings.phoenix_endpoint:
+        return
+    from phoenix.otel import register  # imported only when tracing is on
+
+    register(
+        project_name=settings.phoenix_project,
+        endpoint=settings.phoenix_endpoint,
+        batch=True,
+        auto_instrument=True,
+    )
+    _configured = True
 
 
 @contextmanager

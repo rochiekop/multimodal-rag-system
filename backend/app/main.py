@@ -14,6 +14,7 @@ from app.core.config import Settings, get_settings
 from app.core.db import create_engine, create_sessionmaker
 from app.core.logging import RequestIdMiddleware, configure_logging
 from app.core.storage import LocalFileStore
+from app.core.tracing import setup_tracing
 from app.ingestion.index import ChunkIndex
 from app.llm.gateway import get_chat_model, get_embeddings
 from app.llm.rerank import rerank
@@ -50,6 +51,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     if settings.env != "test":  # tests keep pytest's log capture
         configure_logging(settings.log_level)
+    setup_tracing(settings)
     engine = create_engine(settings.database_url)
 
     @asynccontextmanager
