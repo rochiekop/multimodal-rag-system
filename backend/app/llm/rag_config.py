@@ -58,6 +58,7 @@ class RagConfig(BaseModel):
     chat_model: str = Field(default="gpt-5-mini", min_length=1, max_length=100)
     rewrite_model: str = Field(default="gpt-5-nano", min_length=1, max_length=100)
     fallback_model: str | None = Field(default=None, min_length=1, max_length=100)
+    eval_judge_model: str = Field(default="gpt-5-mini", min_length=1, max_length=100)
     reranker_model: RerankerModel = "Xenova/ms-marco-MiniLM-L-12-v2"
     search_top_k: int = Field(default=50, ge=1, le=200)
     rerank_top_n: int = Field(default=8, ge=1, le=30)

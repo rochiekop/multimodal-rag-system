@@ -85,6 +85,7 @@ class _Result:
     flags: list[tuple[str, str | None]] = field(default_factory=list)
     prompt_text: str | None = None  # set once generation starts, for the usage estimate
     generated: str = ""  # everything the model produced, released or held back
+    contexts: list[str] = field(default_factory=list)  # full texts of the retrieved chunks
 
 
 async def _history(session: AsyncSession, conversation_id: uuid.UUID, turns: int) -> list[Message]:
@@ -195,6 +196,7 @@ async def _run(
             collection_ids=collection_ids,
             config=config,
         )
+    result.contexts = [c.text for c in chunks]
     cards = [source_card(n, c) for n, c in enumerate(chunks, start=1)]
     result.top_score = chunks[0].score if chunks else None
     if result.top_score is None or result.top_score < config.rerank_threshold:
@@ -452,3 +454,39 @@ async def answer(
             locked_until=strike.locked_until.isoformat() if strike.locked_until else None,
         )
     yield ChatEvent("done", done)
+
+
+PipelineResult = _Result
+Usage = _Usage
+
+
+async def answer_once(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    deps: ChatDeps,
+    config: RagConfig,
+    *,
+    user: User,
+    question: str,
+    collection_ids: Sequence[uuid.UUID] = (),
+) -> tuple[_Result, _Usage]:
+    """Run the full pipeline (guardrails included) once and save nothing: for evaluation.
+    `user` may be a transient User; only its groups are used. Exceptions propagate."""
+    async with sessionmaker() as session:
+        visible = await visible_collections(session, user)
+    wanted = set(collection_ids)
+    sensitive_scope = any(c.sensitive for c in visible if not wanted or c.id in wanted)
+    usage, result = _Usage(), _Result(standalone=question)
+    async for _ in _run(
+        deps,
+        sessionmaker,
+        config,
+        user=user,
+        question=question,
+        collection_ids=collection_ids,
+        history=[],
+        sensitive_scope=sensitive_scope,
+        usage=usage,
+        result=result,
+    ):
+        pass
+    return result, usage
