@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from functools import lru_cache
 
@@ -18,7 +18,7 @@ from app.core.storage import LocalFileStore
 from app.core.tracing import setup_tracing
 from app.guardrails.limits import RateLimiter
 from app.ingestion.index import ChunkIndex
-from app.llm.gateway import get_chat_model, get_embeddings
+from app.llm.gateway import get_chat_model, get_embeddings, get_moderator
 from app.llm.rerank import rerank
 from app.retrieval.search import RetrievalDeps
 
@@ -43,9 +43,17 @@ def _chat_deps(settings: Settings, index: ChunkIndex) -> ChatDeps:
     def chat_model(name: str) -> BaseChatModel:
         return get_chat_model(settings, name)
 
+    @lru_cache(maxsize=1)
+    def moderator() -> Callable[[str], Awaitable[dict[str, bool]]]:
+        return get_moderator(settings)
+
+    async def moderate(text: str) -> dict[str, bool]:
+        return await moderator()(text)
+
     return ChatDeps(
         retrieval=RetrievalDeps(index=index, embed_query=embed_query, rerank=rerank),
         chat_model=chat_model,
+        moderate=moderate,
     )
 
 

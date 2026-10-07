@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import AsyncIterator
 
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -87,7 +88,9 @@ async def test_low_confidence_returns_not_found_without_calling_llm(
         return [0.01] * len(docs)
 
     def no_llm(name: str):
-        raise AssertionError("the LLM must not be called")
+        if name == RagConfig().chat_model:
+            raise AssertionError("the answer model must not be called")
+        return FakeListChatModel(responses=["{}"])
 
     deps = chat_deps(chunk_index, rerank=low)
     deps.chat_model = no_llm

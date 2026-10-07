@@ -165,17 +165,27 @@ def chat_deps(
     rerank=high_scores,
     embed: FakeEmbed | None = None,
     error_on_chunk: int | None = None,
+    moderation: dict[str, bool] | None = None,
+    models: dict[str, FakeListChatModel] | None = None,
 ) -> ChatDeps:
+    """Fake providers. Extra `models` (e.g. a classifier or judge under its own name) are
+    looked up by the model name RagConfig asks for."""
     defaults = RagConfig()
-    models = {
+    registry = {
         defaults.chat_model: FakeListChatModel(
             responses=[answer], error_on_chunk_number=error_on_chunk
         ),
         defaults.rewrite_model: FakeListChatModel(responses=[rewrite]),
+        **(models or {}),
     }
+
+    async def moderate(text: str) -> dict[str, bool]:
+        return moderation or {}
+
     return ChatDeps(
         retrieval=RetrievalDeps(index=index, embed_query=embed or FakeEmbed(), rerank=rerank),
-        chat_model=models.__getitem__,
+        chat_model=registry.__getitem__,
+        moderate=moderate,
     )
 
 

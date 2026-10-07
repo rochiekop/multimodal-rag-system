@@ -102,3 +102,18 @@ async def test_rate_limiter_fails_open_when_redis_is_down() -> None:
     limiter = RateLimiter(Redis.from_url("redis://127.0.0.1:1/0", socket_connect_timeout=0.2))
     assert await limiter.hit("user:x", limit=0) is True
     await limiter.redis.aclose()
+
+
+async def test_deleting_conversations_does_not_reset_the_daily_cap(
+    app: FastAPI, client: AsyncClient, session: AsyncSession
+) -> None:
+    alice, token = await _world(app, client, session)
+    assert (await _ask(client, token)).status_code == 200
+    # Make the answer that was just metered expensive, then delete every conversation.
+    record = await session.scalar(select(UsageRecord).where(UsageRecord.user_id == alice.id))
+    assert record is not None
+    record.cost_usd = 5.0
+    await session.commit()
+    for conversation in (await client.get("/api/conversations", headers=bearer(token))).json():
+        await client.delete(f"/api/conversations/{conversation['id']}", headers=bearer(token))
+    assert (await _ask(client, token)).status_code == 429
