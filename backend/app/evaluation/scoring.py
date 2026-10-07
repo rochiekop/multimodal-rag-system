@@ -8,6 +8,8 @@ from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from pydantic import SecretStr
+
 from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -97,7 +99,9 @@ class RagasScorer:
         return scores
 
 
-def build_ragas_scorer(settings: Settings, judge_model: str) -> RagasScorer:
+def build_ragas_scorer(
+    settings: Settings, judge_model: str, api_key: SecretStr | None = None
+) -> RagasScorer:
     """Real Ragas metrics judged by `judge_model` (OpenAI). Built offline; calls happen later."""
     from openai import AsyncOpenAI
     from ragas.embeddings import OpenAIEmbeddings
@@ -111,11 +115,12 @@ def build_ragas_scorer(settings: Settings, judge_model: str) -> RagasScorer:
         Faithfulness,
     )
 
-    if settings.openai_api_key is None:
-        raise RuntimeError("RAG_OPENAI_API_KEY is not set")
-    client = AsyncOpenAI(
-        api_key=settings.openai_api_key.get_secret_value(), max_retries=2, timeout=120
-    )
+    key = api_key or settings.openai_api_key
+    if key is None:
+        raise RuntimeError(
+            "No OpenAI API key: save one in admin Settings or set RAG_OPENAI_API_KEY"
+        )
+    client = AsyncOpenAI(api_key=key.get_secret_value(), max_retries=2, timeout=120)
     llm = llm_factory(judge_model, provider="openai", client=client)
     embeddings = OpenAIEmbeddings(client=client, model=settings.embedding_model)
     return RagasScorer(

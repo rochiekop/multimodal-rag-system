@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     clamav_port: int = 3310
 
     openai_api_key: SecretStr | None = None
+    secrets_key: SecretStr | None = None  # Fernet key encrypting API keys saved in Settings
     embedding_model: str = "text-embedding-3-large"
     embedding_dimensions: int = 1024
     vision_model: str = "gpt-5-mini"
@@ -45,6 +46,22 @@ class Settings(BaseSettings):
     def _secret_long_enough(cls, value: SecretStr) -> SecretStr:
         if len(value.get_secret_value()) < 32:
             raise ValueError("RAG_JWT_SECRET must be at least 32 characters")
+        return value
+
+    @field_validator("secrets_key")
+    @classmethod
+    def _secrets_key_is_fernet(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None:
+            from cryptography.fernet import Fernet
+
+            try:
+                Fernet(value.get_secret_value().encode())
+            except ValueError:
+                raise ValueError(
+                    "RAG_SECRETS_KEY must be a Fernet key: generate one with "
+                    '`python -c "from cryptography.fernet import Fernet; '
+                    'print(Fernet.generate_key().decode())"`'
+                ) from None
         return value
 
     def cookie_secure(self) -> bool:

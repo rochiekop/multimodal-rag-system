@@ -5,6 +5,7 @@ import uuid
 from typing import Any
 
 from celery import Celery
+from pydantic import SecretStr
 from qdrant_client import AsyncQdrantClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -17,6 +18,7 @@ from app.ingestion.parse import parse_document
 from app.ingestion.pipeline import IngestionDeps, run_ingestion
 from app.ingestion.scan import scan_bytes
 from app.llm.gateway import describe_image, get_embeddings, get_vision_model
+from app.llm.keys import KeyRing
 from app.llm.sparse import embed_sparse_documents
 
 MAX_RETRIES = 3
@@ -35,9 +37,10 @@ def build_deps(
     settings: Settings,
     sessionmaker: async_sessionmaker[AsyncSession],
     qdrant: AsyncQdrantClient,
+    api_key: SecretStr | None = None,
 ) -> IngestionDeps:
-    embeddings = get_embeddings(settings)
-    vision = get_vision_model(settings)
+    embeddings = get_embeddings(settings, api_key=api_key)
+    vision = get_vision_model(settings, api_key=api_key)
 
     async def scan(data: bytes) -> None:
         if settings.clamav_enabled:
@@ -65,7 +68,10 @@ async def _run(version_id: uuid.UUID, final_attempt: bool) -> DocumentStatus:
     engine = create_engine(settings.database_url)
     qdrant = AsyncQdrantClient(url=settings.qdrant_url)
     try:
-        deps = build_deps(settings, create_sessionmaker(engine), qdrant)
+        sessionmaker = create_sessionmaker(engine)
+        keys = KeyRing(settings, sessionmaker)
+        await keys.refresh(force=True)
+        deps = build_deps(settings, sessionmaker, qdrant, api_key=keys.openai())
         return await run_ingestion(version_id, deps, final_attempt=final_attempt)
     finally:
         await qdrant.close()

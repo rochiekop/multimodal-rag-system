@@ -12,9 +12,11 @@ from app.documents.models import (
 from app.evaluation.models import EvalCase, EvalResult, EvalRun, EvalSet
 from app.guardrails.models import GuardrailEvent, Notification, UsageRecord
 from app.llm.models import RagConfigVersion
+from app.settings_store.models import AppSetting
 from app.users.models import Group, User, user_groups
 
 __all__ = [
+    "AppSetting",
     "AuditLog",
     "Collection",
     "Conversation",
