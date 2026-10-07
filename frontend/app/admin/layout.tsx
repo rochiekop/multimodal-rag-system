@@ -21,7 +21,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             <SidebarTrigger />
             <span className="text-sm text-muted-foreground">Admin console</span>
           </header>
-          <main className="flex-1 p-4 md:p-6">{children}</main>
+          <div className="flex-1 p-4 md:p-6">{children}</div>
         </SidebarInset>
       </SidebarProvider>
     </MeGate>
