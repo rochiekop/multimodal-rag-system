@@ -126,6 +126,26 @@ async def test_csv_import_reports_bad_rows(client: AsyncClient, session: AsyncSe
     body = response.json()
     assert body["created"] == 2
     assert [e["row"] for e in body["errors"]] == [5, 6, 7, 8]
+    assert "question" in body["errors"][-1]["message"]
     cases = (await client.get(f"/api/admin/eval-sets/{set_id}/cases", headers=h)).json()
     assert [c["question"] for c in cases] == ["How many leave days?", "Who is the CEO?"]
     assert len(cases[0]["run_as_group_ids"]) == 2 and cases[1]["unanswerable"] is True
+
+
+async def test_csv_import_survives_rows_with_extra_columns(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    h = await _admin(client, session)
+    await make_group(session, "hr")
+    set_id = await _set(client, h)
+    csv_text = "question,expected_answer,groups\nGood question,,hr\nHello, world,,hr\n"
+    response = await client.post(
+        f"/api/admin/eval-sets/{set_id}/import",
+        headers=h,
+        files={"file": ("cases.csv", csv_text.encode("utf-8"), "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["created"] == 1
+    assert [e["row"] for e in body["errors"]] == [3]
+    assert "more columns" in body["errors"][0]["message"]

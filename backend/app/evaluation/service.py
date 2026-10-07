@@ -121,22 +121,27 @@ async def delete_set(session: AsyncSession, actor: User, set_id: uuid.UUID) -> N
     )
 
 
-async def _validate_refs(session: AsyncSession, data: CaseIn) -> None:
-    async def missing(model: type, ids: Iterable[uuid.UUID]) -> bool:
-        wanted = set(ids)
-        if not wanted:
-            return False
-        found = await session.scalar(
-            select(func.count()).select_from(model).where(model.id.in_(wanted))  # type: ignore[attr-defined]
-        )
-        return int(found or 0) != len(wanted)
+async def _missing(session: AsyncSession, model: type, ids: Iterable[uuid.UUID]) -> bool:
+    wanted = set(ids)
+    if not wanted:
+        return False
+    found = await session.scalar(
+        select(func.count()).select_from(model).where(model.id.in_(wanted))  # type: ignore[attr-defined]
+    )
+    return int(found or 0) != len(wanted)
 
-    if await missing(Group, data.run_as_group_ids):
-        raise InvalidCase("One or more run-as groups do not exist")
-    if await missing(Collection, data.collection_ids):
-        raise InvalidCase("One or more collections do not exist")
-    if await missing(Document, {s.doc_id for s in data.expected_sources}):
+
+async def _validate_docs(session: AsyncSession, data: CaseIn) -> None:
+    if await _missing(session, Document, {s.doc_id for s in data.expected_sources}):
         raise InvalidCase("One or more expected source documents do not exist")
+
+
+async def _validate_refs(session: AsyncSession, data: CaseIn) -> None:
+    if await _missing(session, Group, data.run_as_group_ids):
+        raise InvalidCase("One or more run-as groups do not exist")
+    if await _missing(session, Collection, data.collection_ids):
+        raise InvalidCase("One or more collections do not exist")
+    await _validate_docs(session, data)
 
 
 def _apply(case: EvalCase, data: CaseIn) -> None:
@@ -157,8 +162,10 @@ async def add_case(
     *,
     origin: str = "manual",
     source_message_id: uuid.UUID | None = None,
+    refs_checked: bool = False,
 ) -> EvalCase:
-    await _validate_refs(session, data)
+    if not refs_checked:
+        await _validate_refs(session, data)
     case = EvalCase(eval_set_id=eval_set.id, origin=origin, source_message_id=source_message_id)
     _apply(case, data)
     session.add(case)
@@ -221,10 +228,19 @@ async def import_csv(session: AsyncSession, eval_set: EvalSet, text: str) -> Imp
         if index >= MAX_IMPORT_ROWS:
             errors.append(RowError(row=reader.line_num, message="Too many rows; stopped"))
             break
+        line = reader.line_num
+        if None in raw:  # surplus fields land under the None key
+            errors.append(
+                RowError(
+                    row=line,
+                    message="Row has more columns than the header - quote values that "
+                    "contain commas",
+                )
+            )
+            continue
         row = {(k or "").strip(): (v or "").strip() for k, v in raw.items()}
         if not any(row.values()):
             continue  # blank line
-        line = reader.line_num
         try:
             unknown_groups = [n for n in _names(row.get("groups", "")) if n not in groups]
             unknown_colls = [n for n in _names(row.get("collections", "")) if n not in collections]
@@ -249,9 +265,14 @@ async def import_csv(session: AsyncSession, eval_set: EvalSet, text: str) -> Imp
                     "unanswerable": flag in _TRUE,
                 }
             )
-            await add_case(session, eval_set, data, origin="csv")
+            await _validate_docs(session, data)
+            await add_case(session, eval_set, data, origin="csv", refs_checked=True)
             created += 1
-        except (InvalidCase, ValidationError, ValueError) as exc:
+        except ValidationError as exc:
+            err = exc.errors()[0]
+            loc = ".".join(str(part) for part in err["loc"])
+            errors.append(RowError(row=line, message=f"{loc}: {err['msg']}"))
+        except (InvalidCase, ValueError) as exc:
             message = exc.message if isinstance(exc, InvalidCase) else str(exc).splitlines()[0]
             errors.append(RowError(row=line, message=message))
     return ImportResult(created=created, errors=errors)
