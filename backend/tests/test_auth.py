@@ -24,6 +24,8 @@ PUBLIC_ROUTES = {
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/session"),
     ("DELETE", "/api/auth/session"),
+    ("GET", "/api/branding"),
+    ("GET", "/api/branding/logo"),
 }
 
 

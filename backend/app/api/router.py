@@ -11,6 +11,7 @@ from app.api import (
     chat,
     health,
 )
+from app.api import settings as settings_api
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(health.router)
@@ -22,3 +23,5 @@ api_router.include_router(admin_notifications.router)
 api_router.include_router(admin_rag_config.router)
 api_router.include_router(admin_review.router)
 api_router.include_router(chat.router)
+api_router.include_router(settings_api.public_router)
+api_router.include_router(settings_api.router)
