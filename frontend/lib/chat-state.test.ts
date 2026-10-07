@@ -129,4 +129,29 @@ describe("chatReducer", () => {
       "This request broke the usage policy (2 of 3 warnings)."
     )
   })
+
+  it("does not overwrite a finished answer when stopped or failed", () => {
+    let state = ask()
+    state = chatReducer(state, {
+      type: "event",
+      event: {
+        event: "done",
+        data: {
+          message_id: "t1",
+          content: "Done",
+          outcome: "answered",
+          citations: [],
+          low_confidence: false,
+          trace_id: null,
+        },
+      },
+      tempId: "t1",
+    })
+    state = chatReducer(state, { type: "stopped", tempId: "t1" })
+    state = chatReducer(state, { type: "fail", tempId: "t1", message: "x" })
+    expect(state.messages[1]).toMatchObject({
+      outcome: "answered",
+      content: "Done",
+    })
+  })
 })

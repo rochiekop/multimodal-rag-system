@@ -73,7 +73,8 @@ export async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 /** Clear a stale cookie (so /login can't bounce back) and go to the sign-in page. */
 export async function handleUnauthorized(
-  navigate: (url: string) => void = (url) => window.location.assign(url)
+  navigate: (url: string) => void = (url) => window.location.assign(url),
+  currentPath: () => string = () => window.location.pathname
 ): Promise<void> {
   try {
     await fetch("/api/auth/session", {
@@ -84,7 +85,8 @@ export async function handleUnauthorized(
   } catch {
     // offline: still go to the sign-in page
   } finally {
-    navigate("/login")
+    // Already on the sign-in page: reloading it would loop on a persistent 401.
+    if (currentPath() !== "/login") navigate("/login")
   }
 }
 

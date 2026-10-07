@@ -62,6 +62,19 @@ describe("apiFetch", () => {
     expect(navigate).toHaveBeenCalledWith("/login")
   })
 
+  it("does not navigate when already on /login", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse(null, 204))
+    const navigate = vi.fn()
+    await handleUnauthorized(navigate, () => "/login")
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/auth/session",
+      expect.objectContaining({ method: "DELETE" })
+    )
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
   it("builds conversation search URLs", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")

@@ -28,11 +28,20 @@ export async function* parseSSE(
   const reader = stream.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
+  let finished = false
+  // Normalise line endings on the whole buffer, holding back a trailing CR that may be
+  // the first half of a CRLF split across chunks.
+  const normalise = (final: boolean) => {
+    const hold = !final && buffer.endsWith("\r")
+    const body = hold ? buffer.slice(0, -1) : buffer
+    buffer = body.replace(/\r\n?/g, "\n") + (hold ? "\r" : "")
+  }
   try {
     while (true) {
       const { value, done } = await reader.read()
       if (done) break
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n")
+      buffer += decoder.decode(value, { stream: true })
+      normalise(false)
       let index = buffer.indexOf("\n\n")
       while (index !== -1) {
         const message = parseBlock(buffer.slice(0, index))
@@ -41,10 +50,13 @@ export async function* parseSSE(
         index = buffer.indexOf("\n\n")
       }
     }
-    buffer += decoder.decode().replace(/\r\n/g, "\n")
+    buffer += decoder.decode()
+    normalise(true)
     const tail = parseBlock(buffer.trim())
+    finished = true
     if (tail) yield tail
   } finally {
+    if (!finished) await reader.cancel().catch(() => {})
     reader.releaseLock()
   }
 }
@@ -68,6 +80,12 @@ export async function* streamChat(
   if (!response.body)
     throw new ApiError(502, "no_stream", "The server sent no answer stream")
   for await (const message of parseSSE(response.body)) {
-    yield { event: message.event, data: JSON.parse(message.data) } as ChatEvent
+    let data: unknown
+    try {
+      data = JSON.parse(message.data)
+    } catch {
+      throw new ApiError(502, "bad_stream", "The answer stream was malformed")
+    }
+    yield { event: message.event, data } as ChatEvent
   }
 }

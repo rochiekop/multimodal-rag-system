@@ -71,22 +71,30 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return {
         ...state,
         streaming: false,
-        messages: updateAnswer(state, action.tempId, (m) => ({
-          ...m,
-          streaming: false,
-          outcome: "cancelled",
-        })),
+        messages: updateAnswer(state, action.tempId, (m) =>
+          m.outcome
+            ? m
+            : {
+                ...m,
+                streaming: false,
+                outcome: "cancelled",
+              }
+        ),
       }
     case "fail":
       return {
         ...state,
         streaming: false,
-        messages: updateAnswer(state, action.tempId, (m) => ({
-          ...m,
-          streaming: false,
-          outcome: "error",
-          content: action.message,
-        })),
+        messages: updateAnswer(state, action.tempId, (m) =>
+          m.outcome
+            ? m
+            : {
+                ...m,
+                streaming: false,
+                outcome: "error",
+                content: action.message,
+              }
+        ),
       }
     case "event": {
       const { event, tempId } = action

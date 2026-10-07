@@ -62,15 +62,51 @@ describe("parseSSE", () => {
   })
 })
 
+describe("parseSSE robustness", () => {
+  it("handles CRLF split across chunks and lone CR endings", async () => {
+    const events = await collect(
+      parseSSE(streamOf("event: a\r", "\ndata: 1\r", "\n\r\n"))
+    )
+    expect(events).toEqual([{ event: "a", data: "1" }])
+    const lone = await collect(parseSSE(streamOf("event: b\rdata: 2\r\r")))
+    expect(lone).toEqual([{ event: "b", data: "2" }])
+  })
+
+  it("cancels the source when the consumer stops early", async () => {
+    let cancelled = false
+    const encoder = new TextEncoder()
+    const source = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(encoder.encode("event: a\ndata: 1\n\nevent: b\ndata: 2\n\n"))
+      },
+      cancel() {
+        cancelled = true
+      },
+    })
+    for await (const event of parseSSE(source)) {
+      expect(event.event).toBe("a")
+      break
+    }
+    expect(cancelled).toBe(true)
+  })
+})
+
 describe("streamChat", () => {
+  it("rejects a malformed data payload with bad_stream", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(streamOf("event: token\ndata: {oops\n\n"), { status: 200 })
+    )
+    await expect(collect(streamChat({ question: "q" }))).rejects.toMatchObject({
+      code: "bad_stream",
+    })
+  })
+
   it("posts with the CSRF header and yields typed events", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        new Response(streamOf('event: token\ndata: {"text":"Hi"}\n\n'), {
-          status: 200,
-        })
-      )
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(streamOf('event: token\ndata: {"text":"Hi"}\n\n'), {
+        status: 200,
+      })
+    )
     const events = await collect(streamChat({ question: "q" }))
     expect(events).toEqual([{ event: "token", data: { text: "Hi" } }])
     const [url, init] = fetchMock.mock.calls[0]
