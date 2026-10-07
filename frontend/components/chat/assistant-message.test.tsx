@@ -65,6 +65,18 @@ describe("AssistantMessage", () => {
     expect(container.querySelector("img[onerror]")).toBeNull()
   })
 
+  it("does not render javascript: links", () => {
+    const { container } = renderWithProviders(
+      <AssistantMessage
+        message={message({ content: "[click](javascript:alert(1))" })}
+        onOpenSource={vi.fn()}
+      />
+    )
+    for (const a of container.querySelectorAll("a")) {
+      expect(a.getAttribute("href") ?? "").not.toMatch(/^javascript:/i)
+    }
+  })
+
   it("shows the low-confidence badge and the not-found closest matches", () => {
     renderWithProviders(
       <>

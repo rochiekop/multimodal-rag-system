@@ -4,10 +4,12 @@ import type { ReactElement } from "react"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
 
-export function renderWithProviders(ui: ReactElement) {
-  const client = new QueryClient({
+export function renderWithProviders(
+  ui: ReactElement,
+  client: QueryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
+) {
   return render(
     <QueryClientProvider client={client}>
       <TooltipProvider>{ui}</TooltipProvider>

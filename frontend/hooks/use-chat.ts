@@ -29,6 +29,15 @@ export function useChat(
   useEffect(() => {
     conversationRef.current = state.conversationId
   }, [state.conversationId])
+  // Leaving the page mid-answer cancels the stream; nothing may navigate or dispatch afterwards.
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      abortRef.current?.abort()
+    }
+  }, [])
 
   const ask = useCallback(
     async (question: string, collectionIds: string[]) => {
@@ -46,6 +55,7 @@ export function useChat(
             : {}),
         }
         for await (const event of streamChat(body, controller.signal)) {
+          if (!mountedRef.current) break
           dispatch({ type: "event", event, tempId })
           if (event.event === "meta" && !conversationRef.current) {
             started = event.data.conversation_id
@@ -53,9 +63,11 @@ export function useChat(
           }
         }
       } catch (err) {
+        if (!mountedRef.current) return
         if (controller.signal.aborted) dispatch({ type: "stopped", tempId })
         else if (err instanceof ApiError && err.status === 401) {
           // The stream is outside React Query, so the global 401 handler never sees it.
+          dispatch({ type: "stopped", tempId })
           void handleUnauthorized(navigateTo)
         } else
           dispatch({
@@ -69,7 +81,10 @@ export function useChat(
       } finally {
         abortRef.current = null
         void queryClient.invalidateQueries({ queryKey: ["conversations"] })
-        if (started) onStarted?.(started)
+        // The cached transcript is now stale; the next visit must load fresh.
+        const id = started ?? conversationRef.current
+        if (id) queryClient.removeQueries({ queryKey: ["conversation", id] })
+        if (started && mountedRef.current) onStarted?.(started)
       }
     },
     [queryClient, onStarted]

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { ThumbsDownIcon, ThumbsUpIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
@@ -27,11 +27,14 @@ export function FeedbackButtons({
   const [rating, setRating] = useState(initial)
   const [open, setOpen] = useState(false)
   const [comment, setComment] = useState("")
+  const queryClient = useQueryClient()
   const send = useMutation({
     mutationFn: ({ value, text }: { value: 1 | -1; text?: string }) =>
       api.feedback(messageId, value, text),
     onSuccess: (_, { value }) => {
       setRating(value)
+      // Cached transcripts carry the old rating.
+      queryClient.removeQueries({ queryKey: ["conversation"] })
       setOpen(false)
       toast.success("Thanks for the feedback")
     },

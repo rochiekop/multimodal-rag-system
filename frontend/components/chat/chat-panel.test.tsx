@@ -1,3 +1,4 @@
+import { QueryClient } from "@tanstack/react-query"
 import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -117,5 +118,86 @@ describe("ChatPanel", () => {
       ).toBe(true)
     )
     await waitFor(() => expect(navigateTo).toHaveBeenCalledWith("/login"))
+    expect(screen.queryByText("Could not reach the assistant.")).toBeNull()
+    expect(screen.queryByText(/Unauthorized/)).toBeNull()
+    expect(screen.queryByLabelText("Thinking")).toBeNull()
+    expect(screen.getByPlaceholderText("Ask a question")).not.toBeDisabled()
+  })
+
+  it("aborts the stream and does not navigate when unmounted mid-answer", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    const enc = new TextEncoder()
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        controller = c
+      },
+    })
+    let chatSignal: AbortSignal | undefined
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/api/collections") return jsonResponse([])
+      chatSignal = init?.signal ?? undefined
+      return new Response(body, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    })
+    const { unmount } = renderWithProviders(
+      <ChatPanel conversationId={null} initialMessages={[]} />
+    )
+    await userEvent.type(
+      screen.getByPlaceholderText("Ask a question"),
+      "Hi{Enter}"
+    )
+    await waitFor(() => expect(chatSignal).toBeDefined())
+    controller.enqueue(
+      enc.encode(
+        'event: meta\ndata: {"conversation_id":"c9","user_message_id":"u1"}\n\n'
+      )
+    )
+    unmount()
+    expect(chatSignal!.aborted).toBe(true)
+    try {
+      controller.close()
+    } catch {
+      // already cancelled by the abort
+    }
+    await new Promise((r) => setTimeout(r, 50))
+    expect(replace).not.toHaveBeenCalled()
+  })
+
+  it("drops the cached conversation after an answer so the next visit is fresh", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input) === "/api/collections") return jsonResponse([])
+      return sse(
+        ["meta", { conversation_id: "c1", user_message_id: "u1" }],
+        [
+          "done",
+          {
+            message_id: "m2",
+            content: "New answer.",
+            outcome: "answered",
+            citations: [],
+            low_confidence: false,
+            trace_id: null,
+          },
+        ]
+      )
+    })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    client.setQueryData(["conversation", "c1"], { id: "c1", messages: [] })
+    renderWithProviders(
+      <ChatPanel conversationId="c1" initialMessages={[]} />,
+      client
+    )
+    await userEvent.type(
+      screen.getByPlaceholderText("Ask a question"),
+      "Again{Enter}"
+    )
+    expect(await screen.findByText("New answer.")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(client.getQueryData(["conversation", "c1"])).toBeUndefined()
+    )
   })
 })
