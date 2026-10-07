@@ -81,7 +81,7 @@ async def _classify(
     on_usage: Callable[[str, Any], None],
 ) -> InputVerdict:
     prompt = CLASSIFIER_PROMPT.replace("<<SCOPE>>", scope or DEFAULT_SCOPE)
-    body = question.replace("</question", "&lt;/question")
+    body = question.replace("<", "&lt;")  # no tag variant can close the data block
     try:
         response = await chat_model(model_name).ainvoke(
             [SystemMessage(prompt), HumanMessage(f"<question>\n{body}\n</question>")]
