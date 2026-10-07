@@ -27,6 +27,7 @@ from app.chat.schemas import (
 )
 from app.core.storage import FileStore
 from app.documents.service import page_key
+from app.guardrails import service as guardrails
 from app.guardrails.limits import GuardrailRefusal, check_chat_allowed
 from app.llm.rag_config import get_active
 from app.retrieval.access import permitted_documents, visible_collections
@@ -72,6 +73,9 @@ async def chat(
             session, request.app.state.rate_limiter, user, config.guardrails, body.question
         )
     except GuardrailRefusal as exc:
+        await guardrails.record_preflight_refusal(
+            session, user=user, code=exc.code, settings=config.guardrails
+        )
         await session.commit()  # keep any cost-alert notification
         raise api_error(exc.status, exc.code, exc.message) from None
     try:

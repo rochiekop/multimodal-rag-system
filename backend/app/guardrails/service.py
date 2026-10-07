@@ -160,3 +160,22 @@ async def mark_read(session: AsyncSession, notification_id: uuid.UUID) -> Notifi
         notification.read_at = datetime.now(UTC)
         await session.flush()
     return notification
+
+
+async def record_preflight_refusal(
+    session: AsyncSession, *, user: User, code: str, settings: GuardrailSettings
+) -> None:
+    """Record a pre-flight refusal (rate limit, length, cost cap, lock) at most once per user,
+    check and hour, so admins see it without the log being flooded."""
+    since = datetime.now(UTC) - timedelta(hours=1)
+    recent = await session.scalar(
+        select(GuardrailEvent.id)
+        .where(
+            GuardrailEvent.user_id == user.id,
+            GuardrailEvent.check == code,
+            GuardrailEvent.created_at >= since,
+        )
+        .limit(1)
+    )
+    if recent is None:
+        await record_event(session, user=user, check=code, action="blocked", settings=settings)

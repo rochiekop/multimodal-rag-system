@@ -76,3 +76,49 @@ class RowError(BaseModel):
 class ImportResult(BaseModel):
     created: int
     errors: list[RowError]
+
+
+class ReviewItem(BaseModel):
+    kind: str  # feedback | low_confidence | guardrail
+    id: uuid.UUID  # message id (feedback, low_confidence) or guardrail event id
+    created_at: datetime
+    user_id: uuid.UUID
+    username: str
+    message_id: uuid.UUID | None
+    question: str | None
+    answer: str | None
+    detail: dict[str, Any]
+    reviewed_at: datetime | None
+
+
+class ReviewUser(BaseModel):
+    id: uuid.UUID
+    username: str
+
+
+class ReviewAnswer(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    content: str
+    outcome: str | None
+    sources: list[dict[str, Any]]
+    citations: list[dict[str, Any]]
+    low_confidence: bool
+    guardrail: dict[str, Any] | None
+    feedback_rating: int | None
+    feedback_comment: str | None
+    created_at: datetime
+
+
+class MessageReview(BaseModel):
+    conversation_id: uuid.UUID
+    user: ReviewUser
+    question: str | None
+    answer: ReviewAnswer
+
+
+class AddToSetIn(BaseModel):
+    eval_set_id: uuid.UUID
+    expected_answer: str | None = Field(default=None, max_length=8000)
+    unanswerable: bool = False
