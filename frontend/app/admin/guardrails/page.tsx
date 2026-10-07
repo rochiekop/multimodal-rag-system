@@ -200,6 +200,10 @@ function GuardrailsEditor() {
   return (
     <>
       <form className="grid gap-4" onSubmit={form.handleSubmit(onSubmit)}>
+        <p className="text-sm text-muted-foreground">
+          New versions start from the active configuration (
+          {active.data.version ? `v${active.data.version}` : "defaults"}).
+        </p>
         <Card>
           <CardHeader>
             <CardTitle>Input checks</CardTitle>

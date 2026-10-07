@@ -194,8 +194,9 @@ function OpenAIKeyCard() {
       <CardHeader>
         <CardTitle>OpenAI API key</CardTitle>
         <CardDescription>
-          Encrypted at rest; only the last 4 characters are ever shown. Every
-          service picks up a new key within 30 seconds.
+          Encrypted at rest; only the last 4 characters are ever shown. New
+          answers, uploads and evaluation runs use a new key within 30 seconds;
+          runs already in progress finish with the old key.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">

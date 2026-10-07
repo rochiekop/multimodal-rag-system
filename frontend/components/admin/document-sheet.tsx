@@ -27,7 +27,8 @@ export const isProcessing = (status: VersionStatus) => !DONE.includes(status)
 
 /** The newest version: what the admin is waiting on (it may not be current yet). */
 export const latestVersion = (doc: AdminDocument) =>
-  [...doc.versions].sort((a, b) => b.version_no - a.version_no)[0]
+  [...doc.versions].sort((a, b) => b.version_no - a.version_no)[0] as
+    AdminDocument["versions"][number] | undefined
 
 export function StatusBadge({ status }: { status: VersionStatus }) {
   if (status === "ready") return <Badge variant="secondary">Ready</Badge>

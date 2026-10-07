@@ -137,6 +137,7 @@ function ModelsEditor() {
     try {
       const saved = await create.mutateAsync({ config, note })
       toast.success(`Saved as v${saved.version}. Activate it to use it.`)
+      form.setValue("note", "")
     } catch (error) {
       setFormError(
         error instanceof ApiError ? error.message : "Could not save. Try again."
@@ -210,6 +211,10 @@ function ModelsEditor() {
         <CardContent>
           {active.data && (
             <form className="grid gap-4" onSubmit={form.handleSubmit(onSubmit)}>
+              <p className="text-sm text-muted-foreground">
+                New versions start from the active configuration (
+                {active.data.version ? `v${active.data.version}` : "defaults"}).
+              </p>
               <div className="grid gap-4 md:grid-cols-2">
                 {TEXT_FIELDS.map(([name, label]) => (
                   <Field key={name} data-invalid={!!errors[name]}>

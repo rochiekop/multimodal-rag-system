@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from cryptography.fernet import Fernet, InvalidToken
 from PIL import Image
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import service as audit
@@ -50,6 +50,15 @@ class InvalidLogo(SettingsError):
 class Branding(BaseModel):
     app_name: str = Field(default=DEFAULT_APP_NAME, min_length=1, max_length=60)
     primary_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+
+    @field_validator("app_name", mode="before")
+    @classmethod
+    def _strip_app_name(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError("app_name must not be blank")
+        return value
 
 
 class BrandingOut(Branding):

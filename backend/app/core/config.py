@@ -9,7 +9,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Runtime configuration. Every field maps to an env var with the RAG_ prefix."""
 
-    model_config = SettingsConfigDict(env_prefix="RAG_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="RAG_", env_file=".env", extra="ignore", env_ignore_empty=True
+    )
 
     env: Literal["dev", "test", "prod"] = "dev"
     log_level: str = "INFO"

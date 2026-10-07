@@ -1,7 +1,6 @@
 "use client"
 
 import {
-  flexRender,
   getCoreRowModel,
   getSortedRowModel,
   useReactTable,
@@ -21,6 +20,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+
+/**
+ * Renders a column def as a plain function call, not via TanStack's flexRender: flexRender
+ * uses createElement(fn), so inline column arrays would remount every cell each render.
+ */
+function render<C>(def: unknown, ctx: C): React.ReactNode {
+  return typeof def === "function"
+    ? (def as (c: C) => React.ReactNode)(ctx)
+    : (def as React.ReactNode)
+}
 
 /** The dashboard-01 data-table pattern: TanStack Table rendered with shadcn `table`. */
 export function DataTable<T>({
@@ -64,17 +73,14 @@ export function DataTable<T>({
                       className="-ml-2"
                       onClick={header.column.getToggleSortingHandler()}
                     >
-                      {flexRender(
+                      {render(
                         header.column.columnDef.header,
                         header.getContext()
                       )}
                       <ArrowUpDownIcon />
                     </Button>
                   ) : (
-                    flexRender(
-                      header.column.columnDef.header,
-                      header.getContext()
-                    )
+                    render(header.column.columnDef.header, header.getContext())
                   )}
                 </TableHead>
               ))}
@@ -104,7 +110,7 @@ export function DataTable<T>({
               <TableRow key={row.id}>
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id} className="align-top">
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    {render(cell.column.columnDef.cell, cell.getContext())}
                   </TableCell>
                 ))}
               </TableRow>

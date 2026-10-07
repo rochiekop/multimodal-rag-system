@@ -153,3 +153,17 @@ async def test_keyring_reloads_after_ttl(engine: AsyncEngine, settings: Settings
     assert ring.openai().get_secret_value() == SECRET  # type: ignore[union-attr]
     await ring.refresh(force=True)
     assert ring.openai().get_secret_value() == SECRET  # type: ignore[union-attr]
+
+
+def test_blank_env_values_mean_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAG_SECRETS_KEY", "")
+    monkeypatch.setenv("RAG_OPENAI_API_KEY", "")
+    cfg = Settings(_env_file=None, jwt_secret="x" * 40)  # type: ignore[call-arg]
+    assert cfg.secrets_key is None
+    assert cfg.openai_api_key is None
+
+
+def test_branding_app_name_is_stripped_and_not_blank() -> None:
+    assert service.Branding(app_name="  Acme  ").app_name == "Acme"
+    with pytest.raises(ValueError):
+        service.Branding(app_name="   ")

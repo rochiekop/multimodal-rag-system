@@ -46,7 +46,9 @@ export default function DocumentsPage() {
     queryFn: () => adminApi.documents(collectionId!, showDeleted),
     enabled: !!collectionId,
     refetchInterval: (query) =>
-      query.state.data?.some((d) => isProcessing(latestVersion(d).status))
+      query.state.data?.some((d) =>
+        isProcessing(latestVersion(d)?.status ?? "ready")
+      )
         ? 5000
         : false,
   })
@@ -87,24 +89,29 @@ export default function DocumentsPage() {
       cell: ({ row }) =>
         row.original.deleted_at ? (
           <span className="text-muted-foreground">Deleted</span>
+        ) : latestVersion(row.original) ? (
+          <StatusBadge status={latestVersion(row.original)!.status} />
         ) : (
-          <StatusBadge status={latestVersion(row.original).status} />
+          "—"
         ),
     },
     {
       id: "chunks",
       header: "Chunks",
-      cell: ({ row }) => latestVersion(row.original).chunk_count,
+      cell: ({ row }) => latestVersion(row.original)?.chunk_count ?? "—",
     },
     {
       id: "pages",
       header: "Pages",
-      cell: ({ row }) => latestVersion(row.original).page_count ?? "—",
+      cell: ({ row }) => latestVersion(row.original)?.page_count ?? "—",
     },
     {
       id: "size",
       header: "Size",
-      cell: ({ row }) => formatBytes(latestVersion(row.original).size_bytes),
+      cell: ({ row }) =>
+        latestVersion(row.original)
+          ? formatBytes(latestVersion(row.original)!.size_bytes)
+          : "—",
     },
     {
       id: "access",
@@ -117,7 +124,10 @@ export default function DocumentsPage() {
     {
       id: "updated",
       header: "Updated",
-      cell: ({ row }) => formatDateTime(latestVersion(row.original).updated_at),
+      cell: ({ row }) =>
+        latestVersion(row.original)
+          ? formatDateTime(latestVersion(row.original)!.updated_at)
+          : "—",
     },
   ]
 
