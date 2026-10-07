@@ -110,3 +110,39 @@ async def test_judge_escapes_every_angle_bracket_in_the_answer() -> None:
     body = human.split("<answer>\n", 1)[1].rsplit("\n</answer>", 1)[0]
     assert "<" not in body
     assert "&lt;/ANSWER>" in body
+
+
+def test_card_next_to_other_digit_groups_is_redacted() -> None:
+    guard = _guard()
+    assert _stream(guard, [f"Card {CARD} 12 times."]) == "Card [redacted card] 12 times."
+    assert _stream(_guard(), [f"Ref 7 {CARD} ok"]) == "Ref 7 [redacted card] ok"
+    assert guard.redactions == ["card"]
+
+
+def test_long_answer_in_small_deltas_is_fast() -> None:
+    import time
+
+    answer = ("Employees accrue leave monthly and managers approve requests. " * 400)[:20_000]
+    guard = _guard()
+    started = time.perf_counter()
+    out = _stream(guard, [answer[i : i + 4] for i in range(0, len(answer), 4)])
+    assert time.perf_counter() - started < 1.5
+    assert out == answer
+
+
+def test_value_longer_than_the_holdback_is_redacted_from_where_it_is_known() -> None:
+    secret = "SECRET-" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[:20] * 4  # 87 characters
+    guard = _guard(pii_patterns=[{"name": "secret", "regex": r"\bSECRET-[A-Z]{80}\b"}])
+    text = f"Key: {secret} end of message, padding to flush"
+    out = _stream(guard, [text[i : i + 3] for i in range(0, len(text), 3)])
+    assert "[redacted secret]" in out
+    assert "ABCDEFGHIJKLMNOPQRST" not in out.split("SECRET-", 1)[1][20:]
+    assert out.endswith(" end of message, padding to flush")
+    assert guard.redactions == ["secret"]
+
+
+def test_sources_permit_only_whole_values() -> None:
+    out = _stream(_guard(sources="Write to data@acme.com"), ["Mail a@acme.com or data@acme.com"])
+    assert out == "Mail [redacted email] or data@acme.com"
+    table = _guard(sources="| 4111 | 1111 | 1111 | 1111 |")
+    assert _stream(table, [f"Card {CARD}"]) == "Card [redacted card]"

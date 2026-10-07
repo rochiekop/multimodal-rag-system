@@ -7,7 +7,7 @@ any of it is released."""
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -23,11 +23,17 @@ logger = logging.getLogger(__name__)
 HOLDBACK = 64
 SHINGLE_WORDS = 8
 LEAK_SHINGLES = 2
+LOOKBACK = 256  # how far back a value longer than HOLDBACK can still be matched
 
-_CARD = re.compile(r"\b(?:\d[ -]?){12,18}\d\b")
+_RUN = re.compile(r"(?<!\w)\d+(?:[ -]\d+)*(?!\w)")
+_DIGITS = re.compile(r"\d+")
 _IBAN = re.compile(r"\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b")
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
 _WORD = re.compile(r"\w+")
+_SPACE = re.compile(r"\s")
+
+Span = tuple[int, int]
+Finder = Callable[[str, int], Iterator[Span]]
 
 
 class SystemPromptLeak(Exception):
@@ -57,19 +63,64 @@ def _shingles(text: str) -> set[str]:
     return {" ".join(words[i : i + SHINGLE_WORDS]) for i in range(len(words) - SHINGLE_WORDS + 1)}
 
 
+def _card_spans(text: str, pos: int) -> Iterator[Span]:
+    """Luhn-valid card numbers. A digit run is split into its groups and every span of whole
+    groups holding 13-19 digits is tested, so neighbouring digits cannot hide a card."""
+    for run in _RUN.finditer(text, pos):
+        groups = [
+            (run.start() + g.start(), run.start() + g.end()) for g in _DIGITS.finditer(run[0])
+        ]
+        candidates: list[Span] = []
+        for i, (first, _) in enumerate(groups):
+            digits = 0
+            for start, last in groups[i:]:
+                digits += last - start
+                if digits > 19:
+                    break
+                if digits >= 13 and _luhn(text[first:last]):
+                    candidates.append((first, last))
+        candidates.sort(key=lambda c: (c[0] - c[1], c[0]))  # longest first
+        taken: list[Span] = []
+        for start, end in candidates:
+            if all(end <= t[0] or start >= t[1] for t in taken):
+                taken.append((start, end))
+                yield start, end
+
+
+def _regex_finder(pattern: re.Pattern[str]) -> Finder:
+    return lambda text, pos: ((m.start(), m.end()) for m in pattern.finditer(text, pos))
+
+
+def _detect(
+    finders: list[tuple[str, Finder]], text: str, pos: int = 0
+) -> list[tuple[int, int, str]]:
+    found = [(s, e, name) for name, find in finders for s, e in find(text, pos)]
+    found.sort(key=lambda m: (m[0], -m[1]))
+    kept: list[tuple[int, int, str]] = []
+    for match in found:
+        if not kept or match[0] >= kept[-1][1]:
+            kept.append(match)
+    return kept
+
+
 class OutputGuard:
     def __init__(
         self, settings: GuardrailSettings, *, sources_text: str, system_prompt: str
     ) -> None:
-        self._patterns: list[tuple[str, re.Pattern[str], Callable[[str], bool] | None]] = []
+        self._finders: list[tuple[str, Finder]] = []
         if settings.pii_redaction:
-            self._patterns = [
-                ("card", _CARD, _luhn),
-                ("iban", _IBAN, None),
-                ("email", _EMAIL, None),
+            self._finders = [
+                ("card", _card_spans),
+                ("iban", _regex_finder(_IBAN)),
+                ("email", _regex_finder(_EMAIL)),
             ]
-            self._patterns += [(p.name, re.compile(p.regex), None) for p in settings.pii_patterns]
-        self._allowed = _normalize(sources_text)
+            self._finders += [
+                (p.name, _regex_finder(re.compile(p.regex))) for p in settings.pii_patterns
+            ]
+        # Values that appear in the permitted sources, found by the same detectors.
+        self._allowed = {
+            _normalize(sources_text[s:e]) for s, e, _ in _detect(self._finders, sources_text)
+        }
         self._prompt_shingles = (
             _shingles(system_prompt) if settings.system_prompt_leak_check else set()
         )
@@ -77,6 +128,9 @@ class OutputGuard:
         self._released = 0
         self._out: list[str] = []
         self.redactions: list[str] = []
+        self._words: list[str] = []
+        self._word_pos = 0
+        self._leak_hits: set[str] = set()
 
     @property
     def text(self) -> str:
@@ -84,35 +138,41 @@ class OutputGuard:
 
     def feed(self, delta: str) -> str:
         self._raw += delta
-        self._check_leak()
+        self._check_leak(final=False)
         return self._release(len(self._raw) - HOLDBACK)
 
     def finish(self) -> str:
-        self._check_leak()
+        self._check_leak(final=True)
         return self._release(len(self._raw))
 
-    def _check_leak(self) -> None:
-        if self._prompt_shingles and len(self._prompt_shingles & _shingles(self._raw)) >= (
-            LEAK_SHINGLES
-        ):
+    def _check_leak(self, *, final: bool) -> None:
+        """Incremental: only words completed since the last call are shingled."""
+        if not self._prompt_shingles:
+            return
+        for match in _WORD.finditer(self._raw, self._word_pos):
+            if not final and match.end() == len(self._raw):
+                break  # the word may still grow
+            self._word_pos = match.end()
+            self._words.append(match[0].lower())
+            last = len(self._words)
+            if last >= SHINGLE_WORDS:
+                shingle = " ".join(self._words[last - SHINGLE_WORDS : last])
+                if shingle in self._prompt_shingles:
+                    self._leak_hits.add(shingle)
+        if len(self._leak_hits) >= LEAK_SHINGLES:
             raise SystemPromptLeak()
 
     def _matches(self) -> list[tuple[int, int, str]]:
-        found: list[tuple[int, int, str]] = []
-        for name, pattern, valid in self._patterns:
-            for match in pattern.finditer(self._raw):
-                value = match.group(0)
-                if valid is not None and not valid(value):
-                    continue
-                if _normalize(value) in self._allowed:
-                    continue
-                found.append((match.start(), match.end(), name))
-        found.sort(key=lambda m: (m[0], -m[1]))
-        kept: list[tuple[int, int, str]] = []
-        for match in found:
-            if not kept or match[0] >= kept[-1][1]:
-                kept.append(match)
-        return kept
+        """PII matches in the window that can still affect unreleased text."""
+        start = max(0, self._released - LOOKBACK)
+        if start:
+            space = _SPACE.search(self._raw, start, self._released)
+            start = space.end() if space else start
+        return [
+            (s, e, name)
+            for s, e, name in _detect(self._finders, self._raw, start)
+            if e > self._released and _normalize(self._raw[s:e]) not in self._allowed
+        ]
 
     def _release(self, cut: int) -> str:
         if cut <= self._released:
@@ -120,14 +180,15 @@ class OutputGuard:
         matches = self._matches()
         for start, end, _ in matches:
             if start < cut < end:  # never split a value; wait for the rest of it
-                cut = start
+                cut = max(start, self._released)
         if cut <= self._released:
             return ""
         pieces: list[str] = []
         position = self._released
         for start, end, name in matches:
-            if start >= position and end <= cut:
-                pieces.append(self._raw[position:start])
+            if end <= cut:
+                # A value that began before the released point redacts only its remainder.
+                pieces.append(self._raw[position : max(start, position)])
                 pieces.append(f"[redacted {name}]")
                 self.redactions.append(name)
                 position = end
