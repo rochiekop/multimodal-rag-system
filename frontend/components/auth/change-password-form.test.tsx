@@ -8,14 +8,12 @@ import { jsonResponse, renderWithProviders } from "@/test/render"
 describe("ChangePasswordForm", () => {
   it("checks the confirmation and calls the session password endpoint", async () => {
     const onDone = vi.fn()
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        jsonResponse({
-          must_change_password: false,
-          user: { id: "u1", username: "alice" },
-        })
-      )
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        must_change_password: false,
+        user: { id: "u1", username: "alice" },
+      })
+    )
     renderWithProviders(<ChangePasswordForm onDone={onDone} />)
     await userEvent.type(
       screen.getByLabelText("Current password"),

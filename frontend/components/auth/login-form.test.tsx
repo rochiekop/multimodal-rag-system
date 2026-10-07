@@ -2,7 +2,7 @@ import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { LoginForm } from "@/components/auth/login-form"
+import { LoginForm, safeNext } from "@/components/auth/login-form"
 import { jsonResponse, renderWithProviders } from "@/test/render"
 
 const replace = vi.fn()
@@ -88,5 +88,24 @@ describe("LoginForm", () => {
     renderWithProviders(<LoginForm next="//evil.example/app" />)
     await fillAndSubmit()
     expect(replace).toHaveBeenCalledWith("/app")
+  })
+})
+
+describe("safeNext", () => {
+  it("keeps local paths", () => {
+    expect(safeNext("/app/c/1?x=1#y")).toBe("/app/c/1?x=1#y")
+  })
+
+  it.each([
+    "/\\evil.example",
+    "/\\/evil.example",
+    "/\t/evil.example",
+    "//evil.example",
+    "https://evil.example",
+    "",
+    undefined,
+    "app",
+  ])("falls back to /app for %j", (value) => {
+    expect(safeNext(value)).toBe("/app")
   })
 })

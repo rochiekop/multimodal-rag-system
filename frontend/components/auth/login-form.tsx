@@ -32,7 +32,15 @@ type Values = z.infer<typeof schema>
 
 /** Only same-site paths are allowed as the post-login destination. */
 export function safeNext(next: string | undefined): string {
-  return next && next.startsWith("/") && !next.startsWith("//") ? next : "/app"
+  if (!next || !next.startsWith("/") || next.startsWith("//")) return "/app"
+  if (/[\\\u0000-\u001f\u007f]/.test(next)) return "/app"
+  try {
+    const url = new URL(next, "http://placeholder.local")
+    if (url.origin !== "http://placeholder.local") return "/app"
+    return url.pathname + url.search + url.hash
+  } catch {
+    return "/app"
+  }
 }
 
 export function LoginForm({ next }: { next?: string }) {
