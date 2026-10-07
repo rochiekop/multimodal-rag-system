@@ -83,6 +83,31 @@ async def test_postgres_recheck_drops_stale_payload(
     assert await _search(session, _deps(chunk_index), alice) == []
 
 
+async def test_revoking_group_from_collection_hides_its_chunks(
+    session: AsyncSession, chunk_index: ChunkIndex
+) -> None:
+    alice, hr_coll, _, hr_doc, _, mgmt = await _world(session, chunk_index)
+    before = await _search(session, _deps(chunk_index), alice)
+    assert {r.doc_id for r in before} == {hr_doc.id}
+    # Revoke hr from the collection in Postgres only: the Qdrant payload is stale.
+    hr_coll.groups = [mgmt]
+    await session.commit()
+    assert await _search(session, _deps(chunk_index), alice) == []
+
+
+async def test_removing_user_from_group_hides_its_chunks(
+    session: AsyncSession, chunk_index: ChunkIndex
+) -> None:
+    alice, _, _, hr_doc, _, _ = await _world(session, chunk_index)
+    before = await _search(session, _deps(chunk_index), alice)
+    assert {r.doc_id for r in before} == {hr_doc.id}
+    alice.groups = []
+    await session.commit()
+    alice = await session.get(User, alice.id, populate_existing=True)
+    assert alice is not None and alice.groups == []
+    assert await _search(session, _deps(chunk_index), alice) == []
+
+
 async def test_only_current_version_chunks_are_used(
     session: AsyncSession, chunk_index: ChunkIndex
 ) -> None:
