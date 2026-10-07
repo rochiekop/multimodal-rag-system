@@ -19,7 +19,12 @@ from app.users.models import Role, User
 from tests.factories import DEFAULT_PASSWORD, bearer, login, make_user
 
 # Routes reachable without a token. Adding one must be a deliberate, reviewed decision.
-PUBLIC_ROUTES = {("GET", "/api/health"), ("POST", "/api/auth/login")}
+PUBLIC_ROUTES = {
+    ("GET", "/api/health"),
+    ("POST", "/api/auth/login"),
+    ("POST", "/api/auth/session"),
+    ("DELETE", "/api/auth/session"),
+}
 
 
 # ---------- tokens ----------

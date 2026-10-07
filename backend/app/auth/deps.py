@@ -1,11 +1,12 @@
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import api_error
 from app.auth.service import InvalidCredentials, confirm_password
+from app.auth.session import CSRF_HEADER, SESSION_COOKIE, UNSAFE_METHODS
 from app.auth.tokens import TokenError, decode_access_token
 from app.core.config import Settings, get_app_settings
 from app.core.db import get_session
@@ -19,15 +20,27 @@ _WWW_AUTH = {"WWW-Authenticate": "Bearer"}
 
 
 async def current_user_allow_password_change(
+    request: Request,
     session: SessionDep,
     settings: SettingsDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> User:
-    """Any authenticated, active user, including one who still must change their password."""
-    if credentials is None:
+    """Any authenticated, active user, including one who still must change their password.
+    Bearer header first; otherwise the session cookie, whose writes need the CSRF header."""
+    if credentials is not None:
+        token: str | None = credentials.credentials
+    else:
+        token = request.cookies.get(SESSION_COOKIE)
+        if (
+            token is not None
+            and request.method in UNSAFE_METHODS
+            and request.headers.get(CSRF_HEADER) != "1"
+        ):
+            raise api_error(403, "csrf_required", "Missing CSRF protection header")
+    if token is None:
         raise api_error(401, "not_authenticated", "Missing bearer token", headers=_WWW_AUTH)
     try:
-        user_id, token_version = decode_access_token(credentials.credentials, settings)
+        user_id, token_version = decode_access_token(token, settings)
     except TokenError:
         raise api_error(
             401, "invalid_token", "Invalid or expired token", headers=_WWW_AUTH
