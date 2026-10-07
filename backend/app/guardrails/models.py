@@ -31,6 +31,8 @@ class GuardrailEvent(Base):
     action: Mapped[str] = mapped_column(String(20))  # blocked | flagged | support | redirected
     strike: Mapped[bool] = mapped_column(default=False)
     detail: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by: Mapped[uuid.UUID | None]
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

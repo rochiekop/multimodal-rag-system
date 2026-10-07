@@ -70,4 +70,6 @@ class Message(Base):
     feedback_rating: Mapped[int | None] = mapped_column(SmallInteger)
     feedback_comment: Mapped[str | None] = mapped_column(String(2000))
     feedback_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by: Mapped[uuid.UUID | None]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
