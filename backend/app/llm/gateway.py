@@ -2,12 +2,14 @@
 Swapping providers later means changing these factories, not their callers."""
 
 import base64
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from openai import AsyncOpenAI
 from pydantic import SecretStr
 
 from app.core.config import Settings
@@ -73,3 +75,21 @@ def content_text(content: str | list[Any]) -> str:
         elif isinstance(part, dict) and part.get("type", "text") == "text":
             parts.append(str(part.get("text", "")))
     return "".join(parts)
+
+
+MODERATION_MODEL = "omni-moderation-latest"
+
+
+def get_moderator(
+    settings: Settings, client: Any = None
+) -> Callable[[str], Awaitable[dict[str, bool]]]:
+    """OpenAI Moderation: returns the provider's category flags for a text."""
+    openai_client = client or AsyncOpenAI(
+        api_key=_api_key(settings).get_secret_value(), max_retries=1, timeout=10
+    )
+
+    async def moderate(text: str) -> dict[str, bool]:
+        response = await openai_client.moderations.create(model=MODERATION_MODEL, input=text)
+        return {k: bool(v) for k, v in response.results[0].categories.model_dump().items()}
+
+    return moderate
