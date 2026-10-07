@@ -108,12 +108,14 @@ class RagConfigVersionOut(BaseModel):
     is_active: bool
     created_at: datetime
     activated_at: datetime | None
+    latest_eval: dict[str, Any] | None = None
     config: RagConfig = Field(validation_alias="data")
 
 
 class ActiveConfigOut(BaseModel):
     version: int | None
     config: RagConfig
+    latest_eval: dict[str, Any] | None = None
 
 
 class RagConfigNotFound(Exception):

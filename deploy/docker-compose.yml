@@ -103,7 +103,7 @@ services:
     build:
       context: ../backend
     restart: unless-stopped
-    command: ["celery", "-A", "app.ingestion.tasks", "worker", "-Q", "ingestion", "--concurrency=2", "--loglevel=INFO"]
+    command: ["celery", "-A", "app.worker", "worker", "-Q", "ingestion,evaluation", "--concurrency=2", "--loglevel=INFO"]
     env_file: .env
     environment: *backend-env
     volumes:

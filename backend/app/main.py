@@ -23,6 +23,12 @@ def _enqueue_with_celery(version_id: uuid.UUID) -> None:
     enqueue_ingestion(version_id)
 
 
+def _enqueue_eval_with_celery(run_id: uuid.UUID) -> None:
+    from app.evaluation.tasks import enqueue_eval  # imported lazily: Celery + Ragas
+
+    enqueue_eval(run_id)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     if settings.env != "test":  # tests keep pytest's log capture
@@ -59,6 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         Redis.from_url(settings.redis_url, socket_connect_timeout=1, socket_timeout=1)
     )
     app.state.enqueue = _enqueue_with_celery
+    app.state.enqueue_eval = _enqueue_eval_with_celery
     app.add_middleware(RequestIdMiddleware)
     app.include_router(api_router)
     return app

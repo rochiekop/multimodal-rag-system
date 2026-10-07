@@ -1,22 +1,28 @@
 """Evaluation admin API: eval sets, cases and CSV import (runs are added in Task 4)."""
 
+import logging
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 
 from app.api.errors import api_error
 from app.auth.deps import AdminUser, SessionDep
-from app.evaluation import service
+from app.evaluation import runs, service
 from app.evaluation.schemas import (
     CaseIn,
     EvalCaseOut,
+    EvalResultOut,
+    EvalRunDetail,
+    EvalRunOut,
     EvalSetIn,
     EvalSetOut,
     EvalSetUpdate,
     ImportResult,
+    RunIn,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin-evaluation"])
 MAX_CSV_BYTES = 2 * 1024 * 1024
 _STATUS = {service.NotFound: 404, service.NameTaken: 409, service.InvalidCase: 422}
@@ -139,3 +145,51 @@ async def import_cases(
         raise _http_error(exc) from None
     await session.commit()
     return result
+
+
+@router.post("/eval-runs", status_code=202)
+async def start_run(
+    body: RunIn, user: AdminUser, session: SessionDep, request: Request
+) -> EvalRunOut:
+    try:
+        run = await runs.create_run(session, user, body.eval_set_id, body.rag_config_id)
+    except service.EvaluationError as exc:
+        raise _http_error(exc) from None
+    await session.commit()
+    try:
+        request.app.state.enqueue_eval(run.id)
+    except Exception:
+        logger.exception("Could not queue eval run %s", run.id)
+        run.status, run.error = "failed", "Could not queue the run; start it again"
+        await session.commit()
+        raise api_error(503, "queue_unavailable", "Could not queue the run") from None
+    return EvalRunOut.model_validate(run)
+
+
+@router.get("/eval-runs")
+async def list_runs(
+    _: AdminUser, session: SessionDep, eval_set_id: uuid.UUID | None = None
+) -> list[EvalRunOut]:
+    return [EvalRunOut.model_validate(r) for r in await runs.list_runs(session, eval_set_id)]
+
+
+@router.get("/eval-runs/compare")
+async def compare_runs(
+    a: uuid.UUID, b: uuid.UUID, _: AdminUser, session: SessionDep
+) -> dict[str, Any]:
+    try:
+        return await runs.compare(session, a, b)
+    except service.EvaluationError as exc:
+        raise _http_error(exc) from None
+
+
+@router.get("/eval-runs/{run_id}")
+async def get_run(run_id: uuid.UUID, _: AdminUser, session: SessionDep) -> EvalRunDetail:
+    try:
+        run, results = await runs.get_run(session, run_id)
+    except service.EvaluationError as exc:
+        raise _http_error(exc) from None
+    return EvalRunDetail(
+        **EvalRunOut.model_validate(run).model_dump(),
+        results=[EvalResultOut.model_validate(r) for r in results],
+    )

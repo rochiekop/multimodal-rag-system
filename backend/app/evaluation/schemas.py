@@ -122,3 +122,45 @@ class AddToSetIn(BaseModel):
     eval_set_id: uuid.UUID
     expected_answer: str | None = Field(default=None, max_length=8000)
     unanswerable: bool = False
+
+
+class RunIn(BaseModel):
+    eval_set_id: uuid.UUID
+    rag_config_id: uuid.UUID | None = None  # None: the active version (or defaults)
+
+
+class EvalRunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    eval_set_id: uuid.UUID
+    rag_config_id: uuid.UUID | None
+    rag_config_version: int | None
+    status: str
+    error: str | None
+    case_count: int
+    summary: dict[str, Any]
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+class EvalResultOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    case_id: uuid.UUID | None
+    question: str
+    unanswerable: bool
+    outcome: str
+    answer: str
+    sources: list[dict[str, Any]]
+    metrics: dict[str, Any]
+    latency_ms: int
+    cost_usd: float
+    trace_id: str | None
+    error: str | None
+
+
+class EvalRunDetail(EvalRunOut):
+    results: list[EvalResultOut]

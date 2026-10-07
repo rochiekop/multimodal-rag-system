@@ -117,13 +117,22 @@ def enqueued() -> list[UUID]:
     return []
 
 
+@pytest.fixture
+def enqueued_evals() -> list[UUID]:
+    return []
+
+
 @pytest_asyncio.fixture
 async def app(
-    settings: Settings, engine: AsyncEngine, enqueued: list[UUID]
+    settings: Settings,
+    engine: AsyncEngine,
+    enqueued: list[UUID],
+    enqueued_evals: list[UUID],
 ) -> AsyncIterator[FastAPI]:
     # Depends on `engine` so tables are truncated after each API test.
     application = create_app(settings)
     application.state.enqueue = enqueued.append
+    application.state.enqueue_eval = enqueued_evals.append
     yield application
     await application.state.engine.dispose()
     index = application.state.index
