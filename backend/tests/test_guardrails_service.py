@@ -87,6 +87,16 @@ async def test_admin_unlock_clears_chat_lock_and_strikes(
     assert response.json()["chat_locked_until"] is None
     assert (await _block(session, alice)).strikes == 1  # slate wiped by the unlock
 
+    # Below the limit nothing is locked, so only the unlock itself can wipe the slate.
+    bob = await make_user(session, username="bob")
+    for _ in range(2):
+        await _block(session, bob)
+    response = await client.patch(
+        f"/api/admin/users/{bob.id}", headers=bearer(token), json={"unlock": True}
+    )
+    assert response.status_code == 200, response.text
+    assert (await _block(session, bob)).strikes == 1
+
 
 async def test_notifications_api_lists_and_marks_read(
     client: AsyncClient, session: AsyncSession
