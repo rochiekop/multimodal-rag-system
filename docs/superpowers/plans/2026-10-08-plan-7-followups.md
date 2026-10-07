@@ -9,8 +9,8 @@ Generated from the Plan 7 execution ledger (2026-10-08). Decisions made during e
 - `NEXT_PUBLIC_PHOENIX_URL` is a frontend build-time variable.
 - CSP: `img-src 'self'` covers the logo, and the audit CSV export is a same-origin download.
 - The admin pages poll every 5 s while documents or eval runs are in progress.
-- The extra e2e test (`frontend/e2e/admin.spec.ts`) needs the worker and an OpenAI key in CI, or is skipped there.
-- The Plan 6 smoke test needs a seeded "annual leave" document that the e2e user can retrieve (see the result below).
+- The extra e2e test (`frontend/e2e/admin.spec.ts`) needs the worker and an OpenAI key in CI, or is skipped there. CI must also set `E2E_USERNAME` and `E2E_PASSWORD` (a super admin) and `E2E_BASE_URL`; the defaults (`root`) rarely exist.
+- The Plan 6 smoke test needs, for the e2e user, a group-accessible collection holding a **PDF** that says employees get twenty days of annual leave (it opens the page image and highlight; a Markdown document has no page image). A super admin with no group sees nothing in chat retrieval.
 
 ## Rulings made during execution
 
@@ -24,12 +24,14 @@ Generated from the Plan 7 execution ledger (2026-10-08). Decisions made during e
 Real stack: `docker compose -f deploy/docker-compose.yml up -d --build` (api, worker, worker-eval, postgres, qdrant, redis, clamav, phoenix all up), frontend via `npm run build && npm start`, super admin `e2eroot` created with `python -m app.cli create-superadmin` inside the api container.
 
 - `npx playwright test` with `E2E_USERNAME`/`E2E_PASSWORD`: `admin.spec.ts` PASSED (28.8 s: login, create collection, upload, Ready, chunk inspector, audit shows `document.uploaded`).
-- `smoke.spec.ts` (Plan 6) FAILED on this fresh database: the answer was "I couldn't find this in the available documents", so no `Source 1:` citation appeared. The chat itself worked (moderation and completion calls to OpenAI returned 200). The e2e user is not in any group and no annual-leave document was retrievable for it, so this is a data/access seed gap, not an admin console regression. Not investigated further.
+- `smoke.spec.ts` (Plan 6): first run FAILED on the fresh database ("I couldn't find this in the available documents"). Causes found and verified by fixing them: (1) `e2eroot` had no group, and the collection had no group, so retrieval returned nothing. Fixed via the admin API (create group `e2e-staff`, add `e2eroot`, grant the "Seed HR" collection with password confirmation). (2) The first seed was Markdown, so the citation appeared but the test then failed at `getByRole('img', { name: /^Page 1 of / })`; a PDF was needed. Uploaded a small hand-built PDF (`leave-policy.pdf`, "Employees get twenty (20) days of annual leave per year.") and soft-deleted the Markdown one. Nothing from the seeding is committed.
+- `admin.spec.ts` was not repeatable: the backend rejects identical content across collections ("Identical content was already uploaded"), so a second run failed at "1 of 1 files queued". Fixed: the spec now uploads the fixture plus a unique `Run <timestamp>` line.
+- Result: `npx playwright test` with `E2E_USERNAME=e2eroot E2E_PASSWORD=…`: **2 passed** (admin.spec.ts and smoke.spec.ts), run twice in a row (15.8 s and 12.2 s).
 
 Manual checks (Step 3.4) were scripted over HTTP through the frontend proxy (`/api` on port 3000), not clicked in a browser:
 
 - Done: logo PNG upload, then primary color `#0f766e`. The public `/api/branding` returned the color and `logo_url`, and `/api/branding/logo` served `image/png`. NOT done: visually checking the sidebar and sign-in page.
-- Done: saved the OpenAI key from `deploy/.env` with password re-entry. Status became `source: database` with last4. A question in `/app` was answered through the saved key. Cleared the key: status returned to `source: environment` (the UI's "Using RAG_OPENAI_API_KEY"). The wording of the UI labels was not checked.
+- Done: saved the OpenAI key from `deploy/.env` with password re-entry. Key status became `source: database` with last4; that shows which source is chosen, not that it was used. `RAG_OPENAI_API_KEY` was still set in the environment, so a successful chat answer does not show the saved key was used, and that was not distinguishable here. Cleared the key: status returned to `source: environment` (the UI's "Using RAG_OPENAI_API_KEY"). The wording of the UI labels was not checked.
 - Done (partly): saved a RagConfig version with a changed `rerank_top_n` (8 to 9) and activated it. NOT done: the activation dialog showing eval scores (no eval runs exist), and a rollback to a previous version (there was no previous active version; version 2 with `rerank_top_n` 8 was created and activated to restore the default).
 - Done: dashboard showed 2 questions, non-zero tokens and cost, and health `database/qdrant/redis` all `ok`.
 - Side effects left in the local stack: collections "E2E <timestamp>" and "Seed HR", super admin `e2eroot`, RagConfig versions 1 and 2 (v2 active), the logo and color `#0f766e`, and `RAG_SECRETS_KEY` added to `deploy/.env` (not committed).
