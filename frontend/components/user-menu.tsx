@@ -4,12 +4,15 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ChevronsUpDownIcon,
   LogOutIcon,
+  MessagesSquareIcon,
   MonitorIcon,
   MoonIcon,
+  ShieldIcon,
   SunIcon,
   UserIcon,
 } from "lucide-react"
 import Link from "next/link"
+import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -30,9 +33,11 @@ import {
 } from "@/components/ui/sidebar"
 import { api } from "@/lib/api"
 import { navigateTo } from "@/lib/navigate"
+import { isAdmin } from "@/lib/roles"
 
 export function UserMenu() {
   const queryClient = useQueryClient()
+  const pathname = usePathname() ?? ""
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: api.me })
   const { theme, setTheme } = useTheme()
   const initials = (me?.full_name || me?.username || "?")
@@ -73,6 +78,19 @@ export function UserMenu() {
                 <UserIcon /> Profile
               </Link>
             </DropdownMenuItem>
+            {me && isAdmin(me) && (
+              <DropdownMenuItem asChild>
+                {pathname.startsWith("/admin") ? (
+                  <Link href="/app">
+                    <MessagesSquareIcon /> Chat
+                  </Link>
+                ) : (
+                  <Link href="/admin">
+                    <ShieldIcon /> Admin console
+                  </Link>
+                )}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuLabel>Theme</DropdownMenuLabel>
             <DropdownMenuRadioGroup value={theme} onValueChange={setTheme}>
