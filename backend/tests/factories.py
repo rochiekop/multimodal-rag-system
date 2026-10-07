@@ -2,13 +2,17 @@ import uuid
 from collections.abc import Iterable, Sequence
 
 from httpx import AsyncClient
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat.answer import ChatDeps
 from app.core.security import hash_password
 from app.documents.access import effective_access_groups
 from app.documents.models import Collection, Document, DocumentStatus, DocumentVersion
 from app.ingestion.index import ChunkIndex, IndexedChunk
+from app.llm.rag_config import RagConfig
 from app.llm.sparse import embed_sparse_documents
+from app.retrieval.search import RetrievalDeps
 from app.users.models import Group, Role, User
 
 DEFAULT_PASSWORD = "correct-horse-42"
@@ -146,3 +150,29 @@ async def seed_document(
     await session.commit()
     await index_chunks(index, document, version.id, texts)
     return document
+
+
+async def high_scores(model: str, query: str, docs: list[str]) -> list[float]:
+    return [0.9 - i * 0.01 for i in range(len(docs))]
+
+
+def chat_deps(
+    index: ChunkIndex,
+    *,
+    answer: str = "Annual leave is 25 days [1].",
+    rewrite: str = "standalone question",
+    rerank=high_scores,
+    embed: FakeEmbed | None = None,
+    error_on_chunk: int | None = None,
+) -> ChatDeps:
+    defaults = RagConfig()
+    models = {
+        defaults.chat_model: FakeListChatModel(
+            responses=[answer], error_on_chunk_number=error_on_chunk
+        ),
+        defaults.rewrite_model: FakeListChatModel(responses=[rewrite]),
+    }
+    return ChatDeps(
+        retrieval=RetrievalDeps(index=index, embed_query=embed or FakeEmbed(), rerank=rerank),
+        chat_model=models.__getitem__,
+    )
