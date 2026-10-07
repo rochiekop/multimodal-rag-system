@@ -41,7 +41,7 @@ def is_refusal(outcome: str, citations: list[dict[str, Any]]) -> bool:
 
 def deterministic_metrics(case: EvalCase, outcome: Any) -> dict[str, float | None]:
     hit_rate: float | None = None
-    if case.expected_sources:
+    if case.expected_sources and outcome.outcome != "error":
         found = {(s.get("doc_id"), s.get("page")) for s in outcome.sources}
         found_docs = {doc for doc, _ in found}
         hit = any(

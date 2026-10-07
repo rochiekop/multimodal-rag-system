@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.chat.answer import answer_once
-from app.chat.models import Message
+from app.chat.models import Conversation, Message
 from app.core.config import Settings
 from app.core.db import create_sessionmaker
 from app.evaluation.models import EvalCase
@@ -42,7 +42,7 @@ async def test_answer_once_saves_nothing(
     assert result.outcome == "answered"
     assert result.contexts == ["Annual leave is 25 days per year."]
     assert result.citations and isinstance(usage.tokens, dict)
-    for model in (Message, UsageRecord, GuardrailEvent):
+    for model in (Conversation, Message, UsageRecord, GuardrailEvent):
         assert await session.scalar(select(func.count()).select_from(model)) == 0
 
 
@@ -92,6 +92,10 @@ def test_refusal_and_idk_metrics() -> None:
     assert deterministic_metrics(answerable, uncited)["idk_correct"] == 0.0
     assert deterministic_metrics(unanswerable, not_found)["idk_correct"] == 1.0
     assert deterministic_metrics(unanswerable, answered)["idk_correct"] == 0.0
+
+    errored = SimpleNamespace(outcome="error", citations=[], sources=[])
+    with_sources = EvalCase(question="q", unanswerable=False, expected_sources=[{"doc_id": "d"}])
+    assert deterministic_metrics(with_sources, errored) == {"hit_rate": None, "idk_correct": None}
 
 
 class _Metric:
@@ -159,3 +163,14 @@ async def test_scorer_failed_metric_is_none() -> None:
 def test_build_ragas_scorer_offline() -> None:
     settings = Settings(_env_file=None, jwt_secret="x" * 40, openai_api_key="sk-test")
     assert isinstance(build_ragas_scorer(settings, "gpt-5-mini"), RagasScorer)
+
+
+async def test_scorer_none_and_nan_values_become_none() -> None:
+    scorer, _ = _scorer(faithfulness=float("nan"))
+    scorer.answer_relevancy = _Metric(0.8)
+    scorer.answer_relevancy.value = None  # type: ignore[assignment]
+    scores = await scorer.score(
+        ScoreInput(question="q", answer="a", contexts=["c"], reference=None, answered=True)
+    )
+    assert scores["faithfulness"] is None and scores["answer_relevancy"] is None
+    assert scores["context_precision"] == 0.8

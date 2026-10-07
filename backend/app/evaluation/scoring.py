@@ -3,6 +3,7 @@ A metric that fails returns None for that case; the run continues."""
 
 import asyncio
 import logging
+import math
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -83,8 +84,16 @@ class RagasScorer:
             if isinstance(outcome, BaseException):
                 logger.warning("Metric %s failed: %s", name, outcome)
                 scores[name] = None
+                continue
+            try:
+                value = float(outcome.value)
+            except (TypeError, ValueError):
+                value = math.nan
+            if math.isfinite(value):
+                scores[name] = value
             else:
-                scores[name] = float(outcome.value)
+                logger.warning("Metric %s returned no usable value: %r", name, outcome.value)
+                scores[name] = None
         return scores
 
 
