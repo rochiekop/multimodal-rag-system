@@ -1,6 +1,7 @@
 """Import every ORM model so Base.metadata knows all tables (used by Alembic and tests)."""
 
 from app.audit.models import AuditLog
+from app.chat.models import Conversation, Message
 from app.documents.models import (
     Collection,
     Document,
@@ -8,14 +9,18 @@ from app.documents.models import (
     collection_groups,
     document_groups,
 )
+from app.llm.models import RagConfigVersion
 from app.users.models import Group, User, user_groups
 
 __all__ = [
     "AuditLog",
     "Collection",
+    "Conversation",
     "Document",
     "DocumentVersion",
     "Group",
+    "Message",
+    "RagConfigVersion",
     "User",
     "collection_groups",
     "document_groups",

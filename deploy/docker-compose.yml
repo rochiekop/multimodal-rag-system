@@ -6,6 +6,7 @@ x-backend-env: &backend-env
   RAG_QDRANT_URL: http://qdrant:6333
   RAG_CLAMAV_HOST: clamav
   RAG_FILES_DIR: /data/files
+  RAG_PHOENIX_ENDPOINT: http://phoenix:6006/v1/traces
 
 services:
   postgres:
@@ -56,6 +57,18 @@ services:
       retries: 20
       start_period: 300s
 
+  phoenix:
+    image: arizephoenix/phoenix:version-20.19.0-nonroot
+    restart: unless-stopped
+    environment:
+      PHOENIX_SQL_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PHOENIX_SQL_DATABASE_SCHEMA: phoenix
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:6006:6006"  # Phoenix UI has no login; keep it on localhost (Caddy auth in Plan 8)
+
   api:
     build:
       context: ../backend
@@ -70,6 +83,8 @@ services:
       redis:
         condition: service_healthy
       qdrant:
+        condition: service_started
+      phoenix:
         condition: service_started
     ports:
       - "127.0.0.1:8000:8000"

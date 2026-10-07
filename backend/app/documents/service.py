@@ -172,6 +172,14 @@ def original_key(version_id: uuid.UUID) -> str:
     return f"versions/{version_id}/original"
 
 
+def page_key(version_id: uuid.UUID, page_no: int) -> str:
+    return f"versions/{version_id}/pages/{page_no}.png"
+
+
+def figure_key(version_id: uuid.UUID, position: int) -> str:
+    return f"versions/{version_id}/figures/{position}.png"
+
+
 async def register_upload(
     session: AsyncSession,
     *,

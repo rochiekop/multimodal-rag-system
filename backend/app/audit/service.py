@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.models import AuditLog
+from app.core.logging import request_id_var
 
 if TYPE_CHECKING:
     from app.users.models import User
@@ -29,6 +30,7 @@ async def record(
         target_type=target_type,
         target_id=str(target_id) if target_id is not None else None,
         detail=detail or {},
+        request_id=request_id_var.get(),
     )
     session.add(entry)
     await session.flush()

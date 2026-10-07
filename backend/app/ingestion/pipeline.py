@@ -15,7 +15,7 @@ from app.audit import service as audit
 from app.core.storage import FileStore
 from app.documents.access import effective_access_groups
 from app.documents.models import Document, DocumentStatus, DocumentVersion
-from app.documents.service import original_key
+from app.documents.service import figure_key, original_key, page_key
 from app.ingestion.chunking import build_chunks, embedding_text
 from app.ingestion.enrich import enrich_figures
 from app.ingestion.errors import PermanentIngestionError
@@ -41,14 +41,6 @@ class IngestionDeps:
     embed_sparse: Callable[[list[str]], list[SparseVector]]
     max_tokens: int = 500
     overlap_tokens: int = 50
-
-
-def page_key(version_id: uuid.UUID, page_no: int) -> str:
-    return f"versions/{version_id}/pages/{page_no}.png"
-
-
-def figure_key(version_id: uuid.UUID, position: int) -> str:
-    return f"versions/{version_id}/figures/{position}.png"
 
 
 async def run_ingestion(

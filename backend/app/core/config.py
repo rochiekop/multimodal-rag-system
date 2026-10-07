@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="RAG_", env_file=".env", extra="ignore")
 
     env: Literal["dev", "test", "prod"] = "dev"
+    log_level: str = "INFO"
     database_url: str = "postgresql+asyncpg://rag:rag@localhost:5432/rag"
     jwt_secret: SecretStr
     jwt_ttl_seconds: int = 8 * 60 * 60
@@ -34,6 +35,9 @@ class Settings(BaseSettings):
     vision_model: str = "gpt-5-mini"
     chunk_max_tokens: int = 500
     chunk_overlap_tokens: int = 50
+
+    phoenix_endpoint: str | None = None  # e.g. http://phoenix:6006/v1/traces
+    phoenix_project: str = "multimodal-rag"
 
     @field_validator("jwt_secret")
     @classmethod

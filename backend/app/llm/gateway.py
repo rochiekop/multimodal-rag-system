@@ -2,6 +2,7 @@
 Swapping providers later means changing these factories, not their callers."""
 
 import base64
+from typing import Any
 
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -53,3 +54,22 @@ async def describe_image(model: BaseChatModel, png: bytes) -> str:
         return content.strip()
     parts = [p.get("text", "") for p in content if isinstance(p, dict)]
     return " ".join(parts).strip()
+
+
+def get_chat_model(settings: Settings, model: str) -> BaseChatModel:
+    return ChatOpenAI(
+        model=model, api_key=_api_key(settings), timeout=60, max_retries=1, stream_usage=True
+    )
+
+
+def content_text(content: str | list[Any]) -> str:
+    """Text of a LangChain message or chunk, whose content is a string or a list of parts."""
+    if isinstance(content, str):
+        return content
+    parts = []
+    for part in content:
+        if isinstance(part, str):
+            parts.append(part)
+        elif isinstance(part, dict) and part.get("type", "text") == "text":
+            parts.append(str(part.get("text", "")))
+    return "".join(parts)

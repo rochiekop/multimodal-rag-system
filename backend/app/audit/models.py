@@ -24,3 +24,4 @@ class AuditLog(Base):
     target_type: Mapped[str | None] = mapped_column(String(50))
     target_id: Mapped[str | None] = mapped_column(String(100))
     detail: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    request_id: Mapped[str | None] = mapped_column(String(64))

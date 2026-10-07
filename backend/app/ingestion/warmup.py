@@ -1,5 +1,6 @@
 """Run at image build time so no model is downloaded while serving requests:
-Docling layout/table/OCR models, the BM25 model and the tiktoken encoding."""
+Docling layout/table/OCR models, the BM25 model, the cross-encoder reranker model and the
+tiktoken encoding."""
 
 import io
 
@@ -7,6 +8,8 @@ from PIL import Image, ImageDraw
 
 from app.ingestion.chunking import build_chunks
 from app.ingestion.parse import parse_document
+from app.llm.rag_config import RagConfig
+from app.llm.rerank import cross_encoder
 from app.llm.sparse import embed_sparse_documents
 
 
@@ -18,6 +21,7 @@ def main() -> None:
     parsed = parse_document(buffer.getvalue(), "warmup.pdf")
     build_chunks(parsed.doc)
     embed_sparse_documents(["warm up"])
+    list(cross_encoder(RagConfig().reranker_model).rerank("warm up", ["warm up"]))
     print("models ready")
 
 
