@@ -4,9 +4,9 @@ active; with none active the defaults below apply. Functions flush but never com
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,6 +71,27 @@ class RagConfig(BaseModel):
     prices: dict[str, ModelPrice] = Field(default_factory=_default_prices)
     guardrails: GuardrailSettings = Field(default_factory=GuardrailSettings)
 
+    @model_validator(mode="after")
+    def _caps_need_prices(self) -> Self:
+        """A cost cap sums priced usage, so an unpriced model would make it silently 0."""
+        settings = self.guardrails
+        if settings.user_daily_cost_usd <= 0 and settings.installation_daily_cost_usd <= 0:
+            return self
+        used = [
+            self.chat_model,
+            self.rewrite_model,
+            self.fallback_model,
+            settings.classifier_model,
+            settings.judge_model,
+        ]
+        missing = sorted({m for m in used if m is not None and m not in self.prices})
+        if missing:
+            raise ValueError(
+                f"Cost caps are on but these models have no price: {', '.join(missing)}. "
+                "Add them to prices or set both daily cost caps to 0."
+            )
+        return self
+
 
 class RagConfigCreate(BaseModel):
     config: RagConfig
@@ -100,6 +121,16 @@ class RagConfigNotFound(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
+
+
+def price_key(config: RagConfig, configured: str, metadata: Mapping[str, Any] | None) -> str:
+    """The prices key for the model the provider says it ran (e.g. a fallback, or a dated
+    name like "gpt-5-mini-2025-08-07"); the configured name when it reports none we know."""
+    reported = (metadata or {}).get("model_name") or (metadata or {}).get("model")
+    if not isinstance(reported, str) or not reported:
+        return configured
+    keys = [k for k in config.prices if reported == k or reported.startswith(f"{k}-")]
+    return max(keys, key=len) if keys else configured
 
 
 def compute_cost(config: RagConfig, tokens: Mapping[str, Sequence[int]]) -> float:

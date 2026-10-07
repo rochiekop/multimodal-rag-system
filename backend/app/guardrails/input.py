@@ -1,10 +1,11 @@
 """Input guardrails: provider moderation plus one small-model classifier for prompt injection,
-exfiltration and (optional) scope. Provider failures fail open and are logged."""
+exfiltration and (optional) scope. Provider failures fail open and are logged; an unreadable
+classifier reply also fails open but is flagged, since the question itself can shape it."""
 
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -47,9 +48,15 @@ DEFAULT_SCOPE = "questions about the company's documents"
 
 
 class InputVerdict(BaseModel):
-    prompt_injection: bool = False
-    exfiltration: bool = False
-    off_topic: bool = False
+    """Every field is required: `{}` or a partial object is an unreadable reply, not "clean"."""
+
+    prompt_injection: bool
+    exfiltration: bool
+    off_topic: bool
+
+
+_CLEAN = InputVerdict(prompt_injection=False, exfiltration=False, off_topic=False)
+UNREADABLE_FLAG: tuple[str, str | None] = ("classifier_unreadable", None)
 
 
 @dataclass(frozen=True)
@@ -59,6 +66,8 @@ class InputDecision:
     category: str | None = None
     strike: bool = False
     flags: tuple[tuple[str, str | None], ...] = ()
+    # A support reply that overlapped a strike-bearing block: the block is still recorded.
+    strike_block: "InputDecision | None" = None
 
 
 def moderation_categories(flags: dict[str, bool]) -> set[str]:
@@ -79,7 +88,8 @@ async def _classify(
     question: str,
     scope: str,
     on_usage: Callable[[str, Any], None],
-) -> InputVerdict:
+) -> InputVerdict | None:
+    """The verdict, or None when the reply couldn't be read."""
     prompt = CLASSIFIER_PROMPT.replace("<<SCOPE>>", scope or DEFAULT_SCOPE)
     body = question.replace("<", "&lt;")  # no tag variant can close the data block
     try:
@@ -88,13 +98,13 @@ async def _classify(
         )
     except Exception:
         logger.warning("Input classifier failed; allowing the question", exc_info=True)
-        return InputVerdict()
+        return _CLEAN
     on_usage(model_name, getattr(response, "usage_metadata", None))
     try:
         return parse_json_reply(content_text(response.content), InputVerdict)
     except ValueError:
-        logger.warning("Input classifier gave no valid verdict; allowing the question")
-        return InputVerdict()
+        logger.warning("Input classifier gave no valid verdict; allowing and flagging")
+        return None
 
 
 async def check_input(
@@ -112,28 +122,50 @@ async def check_input(
         or (settings.exfiltration_check and sensitive_scope)
     )
 
-    async def verdict() -> InputVerdict:
+    async def verdict() -> InputVerdict | None:
         if not needs_classifier:
-            return InputVerdict()
+            return _CLEAN
         return await _classify(
             chat_model, settings.classifier_model, question, settings.scope_description, on_usage
         )
 
-    categories, classified = await asyncio.gather(_moderate(moderate, question), verdict())
-
-    if "self_harm" in categories and settings.self_harm_support:
-        return InputDecision("support", check="self_harm", category="self_harm")
+    categories, verdict_or_none = await asyncio.gather(_moderate(moderate, question), verdict())
     flags: list[tuple[str, str | None]] = []
+    if verdict_or_none is None:
+        flags.append(UNREADABLE_FLAG)
+    classified = verdict_or_none or _CLEAN
+
+    # Evaluate everything first: a self-harm support reply must not hide a strike.
+    support = "self_harm" in categories and settings.self_harm_support
+    block: InputDecision | None = None
     for category in sorted(categories):
+        if support and category == "self_harm":
+            continue
         action = settings.moderation.get(category, "block")  # type: ignore[call-overload]
-        if action == "block":
-            return InputDecision("block", check="moderation", category=category, strike=True)
-        if action == "flag":
+        if action == "block" and block is None:
+            block = InputDecision("block", check="moderation", category=category, strike=True)
+        elif action == "flag":
             flags.append(("moderation", category))
-    if settings.injection_check and classified.prompt_injection:
-        return InputDecision("block", check="prompt_injection", strike=True, flags=tuple(flags))
-    if settings.exfiltration_check and sensitive_scope and classified.exfiltration:
-        return InputDecision("block", check="exfiltration", strike=True, flags=tuple(flags))
+    if block is None and settings.injection_check and classified.prompt_injection:
+        block = InputDecision("block", check="prompt_injection", strike=True)
+    if (
+        block is None
+        and settings.exfiltration_check
+        and sensitive_scope
+        and classified.exfiltration
+    ):
+        block = InputDecision("block", check="exfiltration", strike=True)
+
+    if support:
+        return InputDecision(
+            "support",
+            check="self_harm",
+            category="self_harm",
+            flags=tuple(flags),
+            strike_block=block,
+        )
+    if block is not None:
+        return replace(block, flags=tuple(flags))
     if settings.scope_check and classified.off_topic:
         return InputDecision("off_topic", check="scope", flags=tuple(flags))
     return InputDecision("allow", flags=tuple(flags))

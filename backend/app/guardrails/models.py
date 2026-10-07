@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, String, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,10 +21,10 @@ class GuardrailEvent(Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("conversations.id", ondelete="SET NULL")
+        ForeignKey("conversations.id", ondelete="SET NULL"), index=True
     )
     message_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("messages.id", ondelete="SET NULL")
+        ForeignKey("messages.id", ondelete="SET NULL"), index=True
     )
     check: Mapped[str] = mapped_column(String(40))
     category: Mapped[str | None] = mapped_column(String(40))
@@ -59,13 +59,16 @@ class UsageRecord(Base):
     conversations doesn't reset a cap."""
 
     __tablename__ = "usage_records"
+    __table_args__ = (
+        Index("ix_usage_records_user_id_created_at", "user_id", "created_at"),  # per-user caps
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     message_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("messages.id", ondelete="SET NULL")
+        ForeignKey("messages.id", ondelete="SET NULL"), index=True
     )
     input_tokens: Mapped[int] = mapped_column(default=0)
     output_tokens: Mapped[int] = mapped_column(default=0)

@@ -1,14 +1,21 @@
+import json
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import AsyncIterator, Iterable, Sequence
+from typing import Any
 
 from httpx import AsyncClient
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, SystemMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.answer import ChatDeps
 from app.core.security import hash_password
 from app.documents.access import effective_access_groups
 from app.documents.models import Collection, Document, DocumentStatus, DocumentVersion
+from app.guardrails.input import CLASSIFIER_PROMPT
+from app.guardrails.output import JUDGE_PROMPT
 from app.ingestion.index import ChunkIndex, IndexedChunk
 from app.llm import rag_config
 from app.llm.rag_config import RagConfig
@@ -157,25 +164,104 @@ async def high_scores(model: str, query: str, docs: list[str]) -> list[float]:
     return [0.9 - i * 0.01 for i in range(len(docs))]
 
 
+def verdict(**flags: bool) -> str:
+    """A complete input-classifier reply; unnamed checks are false."""
+    keys = ("prompt_injection", "exfiltration", "off_topic")
+    return json.dumps({k: flags.get(k, False) for k in keys})
+
+
+CLEAN_VERDICT = verdict()
+
+
+def _system(messages: list[BaseMessage]) -> str:
+    first = messages[0] if messages else None
+    return str(first.content) if isinstance(first, SystemMessage) else ""
+
+
+class ScreenedFake(FakeListChatModel):
+    """A FakeListChatModel that answers the input classifier and groundedness judge with
+    fixed verdicts, so one model name can serve rewrite, classifier and judge (as the
+    defaults do) without consuming its scripted responses."""
+
+    classifier_reply: str = CLEAN_VERDICT
+    judge_reply: str = '{"grounded": true}'
+
+    def _call(self, messages: list[BaseMessage], *args: Any, **kwargs: Any) -> str:
+        system = _system(messages)
+        if system.startswith(CLASSIFIER_PROMPT[:40]):
+            return self.classifier_reply
+        if system == JUDGE_PROMPT:
+            return self.judge_reply
+        return super()._call(messages, *args, **kwargs)
+
+
+def _usage(input_tokens: int, output_tokens: int) -> dict[str, int]:
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+    }
+
+
+class MeteredFake(BaseChatModel):
+    """Reports usage and its model name like a real provider: invoke carries both; a stream
+    sends words as chunks with response_metadata and usage on the last chunk only."""
+
+    reply: str
+    reported_model: str = "gpt-5-mini"
+    input_tokens: int = 7
+    output_tokens: int = 3
+
+    @property
+    def _llm_type(self) -> str:
+        return "metered-fake"
+
+    def _generate(self, messages: list[BaseMessage], *args: Any, **kwargs: Any) -> ChatResult:
+        message = AIMessage(
+            content=self.reply,
+            usage_metadata=_usage(self.input_tokens, self.output_tokens),  # type: ignore[arg-type]
+            response_metadata={"model_name": self.reported_model},
+        )
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+    async def _astream(
+        self, messages: list[BaseMessage], *args: Any, **kwargs: Any
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        words = self.reply.split(" ")
+        for n, word in enumerate(words):
+            last = n == len(words) - 1
+            yield ChatGenerationChunk(
+                message=AIMessageChunk(
+                    content=word if last else f"{word} ",
+                    response_metadata={"model_name": self.reported_model},
+                    usage_metadata=(  # type: ignore[arg-type]
+                        _usage(self.input_tokens, self.output_tokens) if last else None
+                    ),
+                )
+            )
+
+
 def chat_deps(
     index: ChunkIndex,
     *,
     answer: str = "Annual leave is 25 days [1].",
     rewrite: str = "standalone question",
+    judge: str = '{"grounded": true}',
     rerank=high_scores,
     embed: FakeEmbed | None = None,
     error_on_chunk: int | None = None,
     moderation: dict[str, bool] | None = None,
-    models: dict[str, FakeListChatModel] | None = None,
+    models: dict[str, BaseChatModel] | None = None,
 ) -> ChatDeps:
     """Fake providers. Extra `models` (e.g. a classifier or judge under its own name) are
-    looked up by the model name RagConfig asks for."""
+    looked up by the model name RagConfig asks for. The default models answer the input
+    classifier with a clean verdict and the judge with `judge`."""
     defaults = RagConfig()
-    registry = {
-        defaults.chat_model: FakeListChatModel(
-            responses=[answer], error_on_chunk_number=error_on_chunk
+    registry: dict[str, BaseChatModel] = {
+        defaults.chat_model: ScreenedFake(
+            responses=[answer], error_on_chunk_number=error_on_chunk, judge_reply=judge
         ),
-        defaults.rewrite_model: FakeListChatModel(responses=[rewrite]),
+        defaults.rewrite_model: ScreenedFake(responses=[rewrite], judge_reply=judge),
         **(models or {}),
     }
 

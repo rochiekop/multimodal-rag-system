@@ -10,6 +10,7 @@ from app.guardrails.input import InputVerdict, check_input, moderation_categorie
 from app.guardrails.json_reply import parse_json_reply
 from app.guardrails.settings import GuardrailSettings
 from app.llm.gateway import get_moderator
+from tests.factories import CLEAN_VERDICT, verdict
 
 CLEAN: dict[str, bool] = {}
 
@@ -36,7 +37,7 @@ async def _check(
     settings: GuardrailSettings | None = None,
     *,
     flags: dict[str, bool] = CLEAN,
-    reply: str = "{}",
+    reply: str = CLEAN_VERDICT,
     sensitive: bool = False,
 ):
     factory, calls = _classifier(reply)
@@ -78,24 +79,24 @@ async def test_self_harm_gets_support_not_a_strike() -> None:
 
 
 async def test_prompt_injection_is_blocked() -> None:
-    decision, calls = await _check(reply='{"prompt_injection": true}')
+    decision, calls = await _check(reply=verdict(prompt_injection=True))
     assert (decision.action, decision.check, decision.strike) == ("block", "prompt_injection", True)
     assert calls == ["gpt-5-nano"]
     off, _ = await _check(
-        GuardrailSettings(injection_check=False), reply='{"prompt_injection": true}'
+        GuardrailSettings(injection_check=False), reply=verdict(prompt_injection=True)
     )
     assert off.action == "allow"
 
 
 async def test_exfiltration_blocks_only_in_sensitive_scope() -> None:
-    reply = '```json\n{"exfiltration": true}\n```'
+    reply = f"```json\n{verdict(exfiltration=True)}\n```"
     assert (await _check(reply=reply, sensitive=False))[0].action == "allow"
     decision, _ = await _check(reply=reply, sensitive=True)
     assert (decision.action, decision.check) == ("block", "exfiltration")
 
 
 async def test_scope_check_redirects_off_topic_questions() -> None:
-    reply = '{"off_topic": true}'
+    reply = verdict(off_topic=True)
     assert (await _check(reply=reply))[0].action == "allow"  # scope check off by default
     settings = GuardrailSettings(scope_check=True, scope_description="HR policies")
     decision, _ = await _check(settings, reply=reply)
@@ -108,9 +109,41 @@ async def test_classifier_skipped_when_no_check_needs_it() -> None:
     assert calls == []
 
 
-async def test_unreadable_classifier_reply_fails_open() -> None:
-    decision, _ = await _check(reply="I think this is fine.")
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "I think this is fine.",
+        "{}",
+        '{"prompt_injection": false}',
+        '{"prompt_injection": true, "exfiltration": true, "off_topic": true} {"x": 1}',
+    ],
+)
+async def test_unreadable_classifier_reply_fails_open_but_is_flagged(reply: str) -> None:
+    # The question can steer the classifier's reply, so "unreadable" must not be silent.
+    decision, _ = await _check(reply=reply, sensitive=True)
     assert decision.action == "allow"
+    assert ("classifier_unreadable", None) in decision.flags
+
+
+async def test_readable_clean_verdict_has_no_flag() -> None:
+    decision, _ = await _check(reply=CLEAN_VERDICT, sensitive=True)
+    assert (decision.action, decision.flags) == ("allow", ())
+
+
+async def test_self_harm_support_keeps_an_overlapping_strike() -> None:
+    decision, _ = await _check(flags={"self_harm": True, "violence": True})
+    assert (decision.action, decision.check, decision.strike) == ("support", "self_harm", False)
+    assert decision.strike_block is not None
+    assert (decision.strike_block.check, decision.strike_block.category) == (
+        "moderation",
+        "violence",
+    )
+    injection, _ = await _check(flags={"self_harm": True}, reply=verdict(prompt_injection=True))
+    assert injection.action == "support"
+    assert injection.strike_block is not None
+    assert injection.strike_block.check == "prompt_injection"
+    plain, _ = await _check(flags={"self_harm": True})
+    assert plain.strike_block is None
 
 
 def _warnings(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -125,7 +158,7 @@ async def test_moderation_failure_fails_open_and_logs(caplog: pytest.LogCaptureF
     async def broken_moderation(text: str) -> dict[str, bool]:
         raise RuntimeError("moderation down")
 
-    factory, _ = _classifier("{}")
+    factory, _ = _classifier(CLEAN_VERDICT)
     with caplog.at_level(logging.WARNING, logger="app.guardrails.input"):
         decision = await check_input(
             GuardrailSettings(),
@@ -152,7 +185,7 @@ async def test_classifier_failure_fails_open_and_logs(caplog: pytest.LogCaptureF
             sensitive_scope=True,
             on_usage=lambda model, usage: None,
         )
-    assert decision.action == "allow"
+    assert (decision.action, decision.flags) == ("allow", ())
     assert len(_warnings(caplog)) == 1
 
 
@@ -177,7 +210,8 @@ async def test_question_cannot_close_the_classifier_data_block() -> None:
 
 
 def test_parse_json_reply_finds_the_object() -> None:
-    assert parse_json_reply('Sure: {"off_topic": true} done', InputVerdict).off_topic is True
+    reply = f"Sure: {verdict(off_topic=True)} done"
+    assert parse_json_reply(reply, InputVerdict).off_topic is True
 
 
 async def test_get_moderator_returns_category_flags() -> None:

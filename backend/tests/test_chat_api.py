@@ -65,6 +65,22 @@ async def test_chat_streams_and_records_the_conversation(
     assert [m["role"] for m in detail["messages"]] == ["user", "assistant", "user", "assistant"]
 
 
+async def test_conversation_detail_keeps_the_low_confidence_badge(
+    app: FastAPI, client: AsyncClient, session: AsyncSession
+) -> None:
+    _, alice, _ = await _world(app, client, session)
+    app.state.chat_deps = chat_deps(app.state.index, judge='{"grounded": false}')
+    events = await _ask(client, alice, question="How many leave days?")
+    assert events[-1][1]["low_confidence"] is True
+    cid = events[0][1]["conversation_id"]
+
+    detail = (await client.get(f"/api/conversations/{cid}", headers=bearer(alice))).json()
+    assert [(m["role"], m["low_confidence"]) for m in detail["messages"]] == [
+        ("user", False),
+        ("assistant", True),
+    ]
+
+
 async def test_blank_question_is_rejected(
     app: FastAPI, client: AsyncClient, session: AsyncSession
 ) -> None:

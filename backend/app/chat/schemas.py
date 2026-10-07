@@ -45,6 +45,7 @@ class MessageOut(BaseModel):
     outcome: str | None
     sources: list[dict[str, Any]]
     citations: list[dict[str, Any]]
+    low_confidence: bool
     feedback_rating: int | None
     feedback_comment: str | None
     created_at: datetime

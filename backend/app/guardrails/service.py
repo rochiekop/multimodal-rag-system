@@ -137,6 +137,8 @@ async def record_event(
         body=f"Chat is locked until {locked_until:%Y-%m-%d %H:%M} UTC. Unlock from Users.",
         target_type="user",
         target_id=user.id,
+        # Concurrent final strikes lock the same user in the same hour: notify once.
+        dedupe_key=f"strike_lock:{user.id}:{locked_until:%Y%m%d%H}",
     )
     return StrikeResult(strikes=strikes, locked_until=locked_until)
 

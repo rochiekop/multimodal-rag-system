@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from httpx import AsyncClient
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.models import AuditLog
@@ -128,3 +128,20 @@ def test_settings_validate_patterns_and_old_configs_get_defaults() -> None:
     old = RagConfig.model_validate({"chat_model": "gpt-5-mini"})  # stored before Plan 4
     assert old.guardrails == GuardrailSettings() and old.fallback_model is None
     assert GuardrailSettings().moderation["self_harm"] == "flag"
+
+
+async def test_concurrent_final_strikes_notify_once(session: AsyncSession) -> None:
+    alice = await make_user(session, username="alice")
+    for _ in range(2):
+        await _block(session, alice)
+    first = await _block(session, alice)
+    # A racing request counted its final strike before the first lock wiped the slate.
+    await session.execute(update(User).where(User.id == alice.id).values(strike_reset_at=None))
+    await session.commit()
+    second = await _block(session, alice)
+    assert first.locked_until is not None and second.locked_until is not None
+
+    notes = (await session.scalars(select(Notification))).all()
+    same_hour = f"{first.locked_until:%Y%m%d%H}" == f"{second.locked_until:%Y%m%d%H}"
+    assert len(notes) == (1 if same_hour else 2)
+    assert notes[0].dedupe_key == f"strike_lock:{alice.id}:{first.locked_until:%Y%m%d%H}"

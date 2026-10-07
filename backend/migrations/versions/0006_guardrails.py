@@ -70,6 +70,10 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_guardrail_events_user_id"), "guardrail_events", ["user_id"])
     op.create_index(op.f("ix_guardrail_events_created_at"), "guardrail_events", ["created_at"])
+    op.create_index(
+        op.f("ix_guardrail_events_conversation_id"), "guardrail_events", ["conversation_id"]
+    )
+    op.create_index(op.f("ix_guardrail_events_message_id"), "guardrail_events", ["message_id"])
     op.create_table(
         "notifications",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -110,13 +114,21 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_usage_records_user_id"), "usage_records", ["user_id"])
     op.create_index(op.f("ix_usage_records_created_at"), "usage_records", ["created_at"])
+    op.create_index(op.f("ix_usage_records_message_id"), "usage_records", ["message_id"])
+    op.create_index(
+        op.f("ix_usage_records_user_id_created_at"), "usage_records", ["user_id", "created_at"]
+    )
 
 
 def downgrade() -> None:
+    op.drop_index(op.f("ix_usage_records_user_id_created_at"), table_name="usage_records")
+    op.drop_index(op.f("ix_usage_records_message_id"), table_name="usage_records")
     op.drop_index(op.f("ix_usage_records_created_at"), table_name="usage_records")
     op.drop_index(op.f("ix_usage_records_user_id"), table_name="usage_records")
     op.drop_table("usage_records")
     op.drop_table("notifications")
+    op.drop_index(op.f("ix_guardrail_events_message_id"), table_name="guardrail_events")
+    op.drop_index(op.f("ix_guardrail_events_conversation_id"), table_name="guardrail_events")
     op.drop_index(op.f("ix_guardrail_events_created_at"), table_name="guardrail_events")
     op.drop_index(op.f("ix_guardrail_events_user_id"), table_name="guardrail_events")
     op.drop_table("guardrail_events")

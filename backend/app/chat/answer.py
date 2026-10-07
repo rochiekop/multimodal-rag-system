@@ -29,7 +29,7 @@ from app.guardrails.input import InputDecision, check_input
 from app.guardrails.models import UsageRecord
 from app.guardrails.output import OutputGuard, SystemPromptLeak, judge_groundedness
 from app.llm.gateway import content_text
-from app.llm.rag_config import RagConfig, compute_cost, get_active
+from app.llm.rag_config import RagConfig, compute_cost, get_active, price_key
 from app.retrieval.access import visible_collections
 from app.retrieval.search import RetrievalDeps, RetrievedChunk, retrieve
 from app.users.models import User
@@ -59,6 +59,8 @@ class ChatEvent:
 @dataclass
 class _Usage:
     tokens: dict[str, list[int]] = field(default_factory=dict)  # model -> [input, output]
+    generation_model: str | None = None  # price key of the model that streamed the answer
+    generation_reported: bool = False  # the answer stream itself reported usage
 
     def add(self, model: str, usage: Any) -> None:
         if not usage:
@@ -119,7 +121,8 @@ async def _rewrite(
             HumanMessage(f"Conversation:\n{transcript}\n\nFollow-up question: {question}"),
         ]
     )
-    usage.add(config.rewrite_model, getattr(response, "usage_metadata", None))
+    model = price_key(config, config.rewrite_model, getattr(response, "response_metadata", None))
+    usage.add(model, getattr(response, "usage_metadata", None))
     return content_text(response.content).strip() or question
 
 
@@ -134,8 +137,15 @@ async def _generate(
         SystemMessage(config.system_prompt),
         HumanMessage(_sources_message(chunks, question)),
     ]
+    usage.generation_model = config.chat_model
     async for chunk in _model(deps, config, config.chat_model).astream(messages):
-        usage.add(config.chat_model, getattr(chunk, "usage_metadata", None))
+        # Book under the model that actually answered (the fallback, if it took over).
+        model = price_key(config, usage.generation_model, getattr(chunk, "response_metadata", None))
+        usage.generation_model = model
+        reported = getattr(chunk, "usage_metadata", None)
+        if reported:
+            usage.generation_reported = True
+            usage.add(model, reported)
         text = content_text(chunk.content)
         if text:
             yield text
@@ -264,12 +274,12 @@ async def _save(
     started: float,
 ) -> tuple[Message, guardrails.StrikeResult | None]:
     settings = config.guardrails
-    if result.prompt_text is not None and config.chat_model not in usage.tokens:
+    if result.prompt_text is not None and not usage.generation_reported:
         # The provider reports usage on the last chunk only, so an interrupted stream has none.
-        usage.tokens[config.chat_model] = [
-            len(_ENCODING.encode(result.prompt_text, disallowed_special=())),
-            len(_ENCODING.encode(result.generated, disallowed_special=())),
-        ]
+        # Added even when other calls (classifier, rewrite) already used the same model.
+        entry = usage.tokens.setdefault(usage.generation_model or config.chat_model, [0, 0])
+        entry[0] += len(_ENCODING.encode(result.prompt_text, disallowed_special=()))
+        entry[1] += len(_ENCODING.encode(result.generated, disallowed_special=()))
     async with sessionmaker() as session:
         input_tokens = sum(t[0] for t in usage.tokens.values())
         output_tokens = sum(t[1] for t in usage.tokens.values())
@@ -318,6 +328,20 @@ async def _save(
                 message_id=message.id,
                 settings=settings,
             )
+        blocked = decision.strike_block if decision is not None else None
+        if blocked is not None and blocked.check is not None:
+            # Support wins the reply, but the block it overlapped still counts as a strike.
+            strike = await guardrails.record_event(
+                session,
+                user=user,
+                check=blocked.check,
+                category=blocked.category,
+                action="blocked",
+                strike=True,
+                conversation_id=conversation_id,
+                message_id=message.id,
+                settings=settings,
+            )
         for check, category in dict.fromkeys(result.flags):
             await guardrails.record_event(
                 session,
@@ -335,7 +359,8 @@ async def _save(
             .values(updated_at=func.now())
         )
         await session.commit()
-    return message, strike if decision is not None and decision.strike else None
+    strikes = decision is not None and (decision.strike or decision.strike_block is not None)
+    return message, strike if strikes else None
 
 
 async def answer(
