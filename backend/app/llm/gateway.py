@@ -21,24 +21,30 @@ FIGURE_PROMPT = (
 )
 
 
-def _api_key(settings: Settings) -> SecretStr:
-    if settings.openai_api_key is None:
-        raise RuntimeError("RAG_OPENAI_API_KEY is not set")
-    return settings.openai_api_key
+def _api_key(settings: Settings, override: SecretStr | None = None) -> SecretStr:
+    key = override or settings.openai_api_key
+    if key is None:
+        raise RuntimeError(
+            "No OpenAI API key: save one in admin Settings or set RAG_OPENAI_API_KEY"
+        )
+    return key
 
 
-def get_embeddings(settings: Settings) -> Embeddings:
+def get_embeddings(settings: Settings, api_key: SecretStr | None = None) -> Embeddings:
     return OpenAIEmbeddings(
         model=settings.embedding_model,
         dimensions=settings.embedding_dimensions,
-        api_key=_api_key(settings),
+        api_key=_api_key(settings, api_key),
         max_retries=3,
     )
 
 
-def get_vision_model(settings: Settings) -> BaseChatModel:
+def get_vision_model(settings: Settings, api_key: SecretStr | None = None) -> BaseChatModel:
     return ChatOpenAI(
-        model=settings.vision_model, api_key=_api_key(settings), timeout=120, max_retries=2
+        model=settings.vision_model,
+        api_key=_api_key(settings, api_key),
+        timeout=120,
+        max_retries=2,
     )
 
 
@@ -58,9 +64,15 @@ async def describe_image(model: BaseChatModel, png: bytes) -> str:
     return " ".join(parts).strip()
 
 
-def get_chat_model(settings: Settings, model: str) -> BaseChatModel:
+def get_chat_model(
+    settings: Settings, model: str, api_key: SecretStr | None = None
+) -> BaseChatModel:
     return ChatOpenAI(
-        model=model, api_key=_api_key(settings), timeout=60, max_retries=1, stream_usage=True
+        model=model,
+        api_key=_api_key(settings, api_key),
+        timeout=60,
+        max_retries=1,
+        stream_usage=True,
     )
 
 
@@ -81,11 +93,11 @@ MODERATION_MODEL = "omni-moderation-latest"
 
 
 def get_moderator(
-    settings: Settings, client: Any = None
+    settings: Settings, client: Any = None, api_key: SecretStr | None = None
 ) -> Callable[[str], Awaitable[dict[str, bool]]]:
     """OpenAI Moderation: returns the provider's category flags for a text."""
     openai_client = client or AsyncOpenAI(
-        api_key=_api_key(settings).get_secret_value(), max_retries=1, timeout=10
+        api_key=_api_key(settings, api_key).get_secret_value(), max_retries=1, timeout=10
     )
 
     async def moderate(text: str) -> dict[str, bool]:

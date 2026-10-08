@@ -67,6 +67,7 @@ async def list_collections(user: CurrentUser, session: SessionDep) -> list[Visib
 async def chat(
     body: ChatRequest, user: CurrentUser, session: SessionDep, request: Request
 ) -> StreamingResponse:
+    await request.app.state.keys.refresh()  # picks up a key rotated in admin Settings
     _, config = await get_active(session)
     try:
         await check_chat_allowed(

@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-query"
 import { useState, type ReactNode } from "react"
 
+import { BrandingEffect } from "@/components/branding"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -32,6 +33,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider>
       <QueryClientProvider client={client}>
+        <BrandingEffect />
         <TooltipProvider>{children}</TooltipProvider>
         <Toaster richColors position="top-center" />
       </QueryClientProvider>

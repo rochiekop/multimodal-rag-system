@@ -1,9 +1,10 @@
 "use client"
 
-import { MessagesSquareIcon, SquarePenIcon } from "lucide-react"
+import { SquarePenIcon } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
+import { BrandMark } from "@/components/branding"
 import { ConversationList } from "@/components/conversation-list"
 import { UserMenu } from "@/components/user-menu"
 import {
@@ -16,10 +17,11 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
-import { APP_NAME } from "@/lib/config"
+import { useBranding } from "@/lib/branding"
 
 export function AppSidebar() {
   const pathname = usePathname()
+  const { appName } = useBranding()
   const activeId = pathname.startsWith("/app/c/")
     ? pathname.split("/")[3]
     : undefined
@@ -30,10 +32,8 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/app">
-                <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  <MessagesSquareIcon className="size-4" />
-                </div>
-                <span className="truncate font-medium">{APP_NAME}</span>
+                <BrandMark />
+                <span className="truncate font-medium">{appName}</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

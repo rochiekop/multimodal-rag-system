@@ -1,11 +1,14 @@
 import uuid
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from app.api.errors import api_error
 from app.audit import service as audit
-from app.audit.schemas import AuditEntryOut
+from app.audit.schemas import AuditEntryOut, AuditFilters
 from app.auth.deps import AdminUser, SessionDep
 from app.core.security import WeakPasswordError
 from app.users import service
@@ -111,8 +114,60 @@ async def create_group(body: GroupCreate, admin: AdminUser, session: SessionDep)
     return GroupOut.model_validate(group)
 
 
+def _audit_filters(
+    actor: Annotated[str | None, Query(max_length=64)] = None,
+    action: Annotated[str | None, Query(max_length=100)] = None,
+    target_type: Annotated[str | None, Query(max_length=50)] = None,
+    target_id: Annotated[str | None, Query(max_length=100)] = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> AuditFilters:
+    return AuditFilters(
+        actor=actor,
+        action=action,
+        target_type=target_type,
+        target_id=target_id,
+        since=since,
+        until=until,
+    )
+
+
 @router.get("/audit")
 async def list_audit(
-    _: AdminUser, session: SessionDep, limit: Annotated[int, Query(ge=1, le=500)] = 100
+    _: AdminUser,
+    session: SessionDep,
+    filters: Annotated[AuditFilters, Depends(_audit_filters)],
+    before_id: Annotated[int | None, Query(ge=1)] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[AuditEntryOut]:
-    return [AuditEntryOut.model_validate(e) for e in await audit.list_recent(session, limit)]
+    entries = await audit.search(session, filters, before_id=before_id, limit=limit)
+    return [AuditEntryOut.model_validate(e) for e in entries]
+
+
+@router.get("/audit/export")
+async def export_audit(
+    admin: AdminUser,
+    session: SessionDep,
+    request: Request,
+    filters: Annotated[AuditFilters, Depends(_audit_filters)],
+) -> StreamingResponse:
+    await audit.record(
+        session,
+        action="audit.exported",
+        actor=admin,
+        detail={"filters": filters.model_dump(mode="json", exclude_none=True)},
+    )
+    await session.commit()
+    sessionmaker = request.app.state.sessionmaker
+
+    async def lines() -> AsyncIterator[str]:
+        async with sessionmaker() as export_session:  # outlives the request's session
+            async for line in audit.export_lines(export_session, filters):
+                yield line
+
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    return StreamingResponse(
+        lines(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="audit-{stamp}.csv"'},
+    )

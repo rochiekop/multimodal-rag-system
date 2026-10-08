@@ -1,4 +1,5 @@
 import type {
+  Branding,
   Collection,
   Conversation,
   ConversationDetail,
@@ -99,6 +100,7 @@ const post = (body: unknown): RequestInit => ({
 })
 
 export const api = {
+  branding: () => apiJson<Branding>("/api/branding"),
   me: () => apiJson<User>("/api/auth/me"),
   login: (username: string, password: string) =>
     apiJson<SessionInfo>("/api/auth/session", post({ username, password })),

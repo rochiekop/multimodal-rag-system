@@ -14,6 +14,7 @@ from app.evaluation.runs import execute_run
 from app.evaluation.scoring import build_ragas_scorer
 from app.ingestion.index import ChunkIndex
 from app.ingestion.tasks import celery_app
+from app.llm.keys import KeyRing
 
 EVAL_QUEUE = "evaluation"
 
@@ -25,11 +26,14 @@ async def _run(run_id: uuid.UUID) -> None:
     qdrant = AsyncQdrantClient(url=settings.qdrant_url)
     try:
         index = ChunkIndex(qdrant, settings.qdrant_collection, settings.embedding_dimensions)
+        sessionmaker = create_sessionmaker(engine)
+        keys = KeyRing(settings, sessionmaker)
+        await keys.refresh(force=True)
         await execute_run(
             run_id,
-            sessionmaker=create_sessionmaker(engine),
-            deps=build_chat_deps(settings, index),
-            scorer_factory=lambda judge: build_ragas_scorer(settings, judge),
+            sessionmaker=sessionmaker,
+            deps=build_chat_deps(settings, index, keys),
+            scorer_factory=lambda judge: build_ragas_scorer(settings, judge, keys.openai()),
         )
     finally:
         await qdrant.close()

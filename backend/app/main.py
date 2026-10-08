@@ -15,6 +15,7 @@ from app.core.storage import LocalFileStore
 from app.core.tracing import setup_tracing
 from app.guardrails.limits import RateLimiter
 from app.ingestion.index import ChunkIndex
+from app.llm.keys import KeyRing
 
 
 def _enqueue_with_celery(version_id: uuid.UUID) -> None:
@@ -54,13 +55,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.state.sessionmaker = create_sessionmaker(engine)
+    app.state.keys = KeyRing(settings, app.state.sessionmaker)
     app.state.store = LocalFileStore(settings.files_dir)
     app.state.index = ChunkIndex(
         AsyncQdrantClient(url=settings.qdrant_url),
         settings.qdrant_collection,
         settings.embedding_dimensions,
     )
-    app.state.chat_deps = build_chat_deps(settings, app.state.index)
+    app.state.chat_deps = build_chat_deps(settings, app.state.index, app.state.keys)
     app.state.rate_limiter = RateLimiter(
         Redis.from_url(settings.redis_url, socket_connect_timeout=1, socket_timeout=1)
     )
