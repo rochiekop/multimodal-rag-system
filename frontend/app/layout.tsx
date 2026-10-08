@@ -33,7 +33,8 @@ export default function RootLayout({
         geist.variable
       )}
     >
-      <body>
+      {/* Browser extensions (e.g. Grammarly) add attributes to <body> before React hydrates. */}
+      <body suppressHydrationWarning>
         <Providers>{children}</Providers>
       </body>
     </html>
