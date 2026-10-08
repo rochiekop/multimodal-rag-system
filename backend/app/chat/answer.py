@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.chat.citations import clean_citations, format_sources, source_card
 from app.chat.models import Conversation, Message
+from app.chat.small_talk import GOODBYE_REPLY, THANKS_REPLY, small_talk
 from app.core.tracing import answer_span
 from app.guardrails import service as guardrails
 from app.guardrails.input import InputDecision, check_input
@@ -183,6 +184,16 @@ async def _run(
             "support": settings.support_message,
             "off_topic": settings.off_topic_message,
         }[decision.action]
+        return
+
+    kind = small_talk(question)
+    if kind is not None:  # after the input checks, so moderation still applies
+        result.outcome = "small_talk"
+        result.content = {
+            "greeting": config.greeting_message,
+            "thanks": THANKS_REPLY,
+            "goodbye": GOODBYE_REPLY,
+        }[kind]
         return
 
     if history:

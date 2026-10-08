@@ -59,6 +59,7 @@ export interface SourceCard {
 export type Outcome =
   | "answered"
   | "not_found"
+  | "small_talk"
   | "blocked"
   | "support"
   | "off_topic"
@@ -464,6 +465,7 @@ export interface RagConfig {
   system_prompt: string
   rewrite_prompt: string
   not_found_message: string
+  greeting_message: string
   prices: Record<string, { input_per_mtok: number; output_per_mtok: number }>
   guardrails: GuardrailSettings
 }

@@ -38,6 +38,23 @@ function message(overrides: Partial<UIMessage> = {}): UIMessage {
 }
 
 describe("AssistantMessage", () => {
+  it("shows a small-talk reply without sources or rating", () => {
+    renderWithProviders(
+      <AssistantMessage
+        message={message({
+          outcome: "small_talk",
+          content: "Hi! I answer questions using your company's documents.",
+          sources: [],
+          citations: [],
+        })}
+        onOpenSource={vi.fn()}
+      />
+    )
+    expect(screen.getByText(/I answer questions using/)).toBeInTheDocument()
+    expect(screen.queryByText("Closest matches")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Good answer" })).toBeNull()
+  })
+
   it("renders markdown with citation badges for real sources only", async () => {
     const onOpenSource = vi.fn()
     renderWithProviders(

@@ -69,6 +69,14 @@ class RagConfig(BaseModel):
     not_found_message: str = Field(
         default="I couldn't find this in the available documents.", min_length=1, max_length=500
     )
+    greeting_message: str = Field(
+        default=(
+            "Hi! I answer questions using your company's documents. Ask me about a policy, "
+            "a procedure or anything in the files you have access to."
+        ),
+        min_length=1,
+        max_length=500,
+    )
     prices: dict[str, ModelPrice] = Field(default_factory=_default_prices)
     guardrails: GuardrailSettings = Field(default_factory=GuardrailSettings)
 

@@ -80,6 +80,37 @@ async def test_answer_streams_tokens_and_saves_a_cited_message(
     assert assistant.standalone_question is None  # first turn: no rewrite
 
 
+async def test_greeting_gets_a_friendly_reply_without_search(
+    engine: AsyncEngine, session: AsyncSession, chunk_index: ChunkIndex
+) -> None:
+    alice, _, conversation = await _world(session, chunk_index)
+
+    async def no_rerank(model: str, query: str, docs: list[str]) -> list[float]:
+        raise AssertionError("a greeting must not search the documents")
+
+    def no_llm(name: str):
+        if name == RagConfig().chat_model:
+            raise AssertionError("the answer model must not be called")
+        return FakeListChatModel(responses=[CLEAN_VERDICT])
+
+    deps = chat_deps(chunk_index, rerank=no_rerank)
+    deps.chat_model = no_llm
+    events = await _run(engine, deps, alice, conversation, "hello")
+
+    assert [e.event for e in events if e.event in ("sources", "token")] == []
+    done = events[-1].data
+    assert done["outcome"] == "small_talk"
+    assert done["content"] == RagConfig().greeting_message
+    assert done["citations"] == []
+
+    thanks = await _run(engine, deps, alice, conversation, "thank you!")
+    assert thanks[-1].data["outcome"] == "small_talk"
+    assert thanks[-1].data["content"].startswith("You're welcome")
+
+    saved = await _messages(session, conversation)
+    assert [m.outcome for m in saved if m.role == "assistant"] == ["small_talk", "small_talk"]
+
+
 async def test_low_confidence_returns_not_found_without_calling_llm(
     engine: AsyncEngine, session: AsyncSession, chunk_index: ChunkIndex
 ) -> None:
