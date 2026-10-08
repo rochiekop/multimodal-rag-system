@@ -40,7 +40,10 @@
 		X-Frame-Options "DENY"
 	}
 
-	@upload path_regexp ^/api/admin/collections/[^/]+/documents$
+	@upload {
+		method POST
+		path_regexp ^/api/admin/collections/[^/]+/documents$
+	}
 	handle @upload {
 		request_body {
 			max_size 500MB
