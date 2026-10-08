@@ -2,6 +2,7 @@
 feedback and the page images the source viewer shows."""
 
 import asyncio
+import contextlib
 import json
 import logging
 import uuid
@@ -26,6 +27,8 @@ from app.chat.schemas import (
 )
 from app.core.storage import FileStore
 from app.documents.service import page_key
+from app.guardrails.limits import GuardrailRefusal, check_chat_allowed
+from app.llm.rag_config import get_active
 from app.retrieval.access import permitted_documents, visible_collections
 
 logger = logging.getLogger(__name__)
@@ -40,6 +43,18 @@ def _sse(event: ChatEvent) -> str:
     return f"event: {event.event}\ndata: {json.dumps(event.data, ensure_ascii=False)}\n\n"
 
 
+async def sse_events(events: AsyncIterator[ChatEvent]) -> AsyncIterator[str]:
+    """Events as SSE text. Closing this closes `events` too, so a client that disconnects
+    still runs the answer's save instead of waiting for garbage collection."""
+    try:
+        async with contextlib.aclosing(events):
+            async for event in events:
+                yield _sse(event)
+    except Exception:
+        logger.exception("Answer stream failed")
+        yield _sse(ChatEvent("error", {"code": "answer_failed", "message": ERROR_MESSAGE}))
+
+
 @router.get("/collections")
 async def list_collections(user: CurrentUser, session: SessionDep) -> list[VisibleCollectionOut]:
     return [
@@ -51,6 +66,14 @@ async def list_collections(user: CurrentUser, session: SessionDep) -> list[Visib
 async def chat(
     body: ChatRequest, user: CurrentUser, session: SessionDep, request: Request
 ) -> StreamingResponse:
+    _, config = await get_active(session)
+    try:
+        await check_chat_allowed(
+            session, request.app.state.rate_limiter, user, config.guardrails, body.question
+        )
+    except GuardrailRefusal as exc:
+        await session.commit()  # keep any cost-alert notification
+        raise api_error(exc.status, exc.code, exc.message) from None
     try:
         conversation = await service.start_or_get_conversation(
             session, user, body.conversation_id, body.question
@@ -68,16 +91,8 @@ async def chat(
         collection_ids=body.collection_ids,
     )
 
-    async def stream() -> AsyncIterator[str]:
-        try:
-            async for event in events:
-                yield _sse(event)
-        except Exception:
-            logger.exception("Answer stream failed")
-            yield _sse(ChatEvent("error", {"code": "answer_failed", "message": ERROR_MESSAGE}))
-
     return StreamingResponse(
-        stream(),
+        sse_events(events),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
