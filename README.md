@@ -2,6 +2,41 @@
 
 An enterprise knowledge assistant. Staff upload documents (PDF, Office files, Markdown, images); the system scans them for malware, extracts text, tables and figures, indexes them with hybrid dense and sparse retrieval, and answers questions with citations that open the exact source page with the cited passage highlighted. Access is controlled per collection through groups, answers stream token by token, every sensitive action is audited, and an admin console covers documents, users and groups, guardrails, evaluation runs, settings and cost. Traces of every LLM call go to Phoenix. The full design is in `docs/superpowers/specs/2026-10-04-multimodal-rag-v1-design.md`.
 
+## How it works
+
+![How the system works: services, adding a document, asking a question](docs/images/system-flow.svg)
+
+### The pieces
+
+- **Caddy** is the front door. Every request arrives over HTTPS; Caddy sends pages to the **Next.js frontend** and `/api/...` calls to the **FastAPI** backend, and protects the **Phoenix** tracing page with a password.
+- **PostgreSQL** stores users, groups, collections, conversations, settings and the audit log. **Qdrant** holds the search index. **Redis** carries background jobs and rate limits. Uploaded files and page images live in the **files volume**.
+- Two **background workers** do the slow work: `worker` processes uploaded documents, `worker-eval` runs evaluation test sets.
+- **OpenAI** provides the language model, embeddings, image descriptions and moderation. **ClamAV** scans every upload for malware.
+
+### Adding a document
+
+1. An admin uploads files to a collection (Admin → Documents). The API checks the file type, the size (up to 100 MB each) and whether the same file is already there.
+2. The file is saved and a job is queued. The document shows its live status in the admin console.
+3. The worker scans it for malware, then **Docling** extracts the text, tables and page layout (with OCR for scans and images).
+4. Figures and charts are described in words by an OpenAI vision model, so they can be found by search too.
+5. The content is split into chunks of about 500 tokens. Each chunk remembers its page and the region on that page.
+6. Each chunk gets two search representations, a meaning vector (OpenAI embeddings) and keywords (BM25), and is stored in Qdrant together with the groups allowed to see it. The document is now **Ready**.
+
+### Asking a question
+
+1. A user asks a question in the chat, optionally limited to some collections.
+2. **Pre-checks:** rate limit, question length, daily cost cap and any chat lock.
+3. **Input guardrails:** content moderation, prompt-injection and scope checks. Greetings like "hello" or "thanks" get a short friendly reply without searching.
+4. A follow-up ("and for part-time staff?") is rewritten into a standalone question using the conversation.
+5. **Hybrid search** finds the most relevant chunks by meaning and by keywords, only in documents the user's groups can see.
+6. Access is re-checked in PostgreSQL, and a reranker puts the best passages first.
+7. If nothing is relevant enough, the answer is "I couldn't find this in the available documents", with the closest matches shown. The system never makes an answer up.
+8. Otherwise the language model writes an answer **only from those passages**, citing them as [1], [2]. It streams to the browser word by word.
+9. An **output guard** redacts personal data that isn't in the sources, drops citations that don't match a real source, and blocks answers that leak the system prompt.
+10. A judge checks that the answer is supported by the sources (otherwise it shows a *Low confidence* badge). The cost is recorded, the trace goes to Phoenix, and the message is saved.
+
+Clicking a citation badge opens the source page with the cited passage highlighted. 👍/👎 feedback, low-confidence answers and guardrail flags go to **Admin → Review queue**, where an admin can add them to a test set. **Admin → Evaluation** replays a test set through the same pipeline and scores it, so a change to models, prompts or guardrails can be compared before it is activated.
+
 ## Requirements
 
 - Docker with Compose 2.17 or later.
