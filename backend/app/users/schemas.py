@@ -24,6 +24,7 @@ class UserOut(BaseModel):
     is_active: bool
     must_change_password: bool
     locked_until: datetime | None
+    chat_locked_until: datetime | None
     groups: list[GroupOut]
     created_at: datetime
 

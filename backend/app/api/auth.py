@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
 
 from app.api.errors import api_error
@@ -12,6 +12,7 @@ from app.auth.service import (
     authenticate,
     change_password,
 )
+from app.auth.session import clear_session_cookie, set_session_cookie
 from app.auth.tokens import create_access_token
 from app.core.config import Settings
 from app.core.security import WeakPasswordError
@@ -50,8 +51,7 @@ def _token_response(user: User, settings: Settings) -> TokenResponse:
     )
 
 
-@router.post("/login")
-async def login(body: LoginRequest, session: SessionDep, settings: SettingsDep) -> TokenResponse:
+async def _authenticate(body: LoginRequest, session: SessionDep, settings: Settings) -> User:
     try:
         user = await authenticate(
             session, username=body.username, password=body.password, settings=settings
@@ -68,7 +68,64 @@ async def login(body: LoginRequest, session: SessionDep, settings: SettingsDep) 
         await session.commit()
         raise api_error(401, exc.code, "Invalid username or password") from None
     await session.commit()
+    return user
+
+
+@router.post("/login")
+async def login(body: LoginRequest, session: SessionDep, settings: SettingsDep) -> TokenResponse:
+    user = await _authenticate(body, session, settings)
     return _token_response(user, settings)
+
+
+class SessionOut(BaseModel):
+    must_change_password: bool
+    user: UserOut
+
+
+@router.post("/session")
+async def create_session(
+    body: LoginRequest, response: Response, session: SessionDep, settings: SettingsDep
+) -> SessionOut:
+    """Browser sign-in: the token goes into an httpOnly cookie, never into the body."""
+    user = await _authenticate(body, session, settings)
+    set_session_cookie(response, create_access_token(user, settings), settings)
+    return SessionOut(
+        must_change_password=user.must_change_password, user=UserOut.model_validate(user)
+    )
+
+
+@router.delete("/session", status_code=204)
+async def delete_session(settings: SettingsDep) -> Response:
+    """Sign out: clears the cookie. Public, so a stale or invalid cookie can always be cleared."""
+    response = Response(status_code=204)
+    clear_session_cookie(response, settings)
+    return response
+
+
+@router.post("/session/password")
+async def change_session_password(
+    body: ChangePasswordRequest,
+    user: PendingUser,
+    response: Response,
+    session: SessionDep,
+    settings: SettingsDep,
+) -> SessionOut:
+    try:
+        await change_password(
+            session,
+            user=user,
+            current_password=body.current_password,
+            new_password=body.new_password,
+        )
+    except InvalidCredentials as exc:
+        raise api_error(400, exc.code, "Current password is incorrect") from None
+    except WeakPasswordError as exc:
+        raise api_error(422, "weak_password", str(exc)) from None
+    await session.commit()
+    set_session_cookie(response, create_access_token(user, settings), settings)
+    return SessionOut(
+        must_change_password=user.must_change_password, user=UserOut.model_validate(user)
+    )
 
 
 @router.get("/me")

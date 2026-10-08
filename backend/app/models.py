@@ -9,6 +9,8 @@ from app.documents.models import (
     collection_groups,
     document_groups,
 )
+from app.evaluation.models import EvalCase, EvalResult, EvalRun, EvalSet
+from app.guardrails.models import GuardrailEvent, Notification, UsageRecord
 from app.llm.models import RagConfigVersion
 from app.users.models import Group, User, user_groups
 
@@ -18,9 +20,16 @@ __all__ = [
     "Conversation",
     "Document",
     "DocumentVersion",
+    "EvalCase",
+    "EvalResult",
+    "EvalRun",
+    "EvalSet",
+    "GuardrailEvent",
     "Group",
     "Message",
+    "Notification",
     "RagConfigVersion",
+    "UsageRecord",
     "User",
     "collection_groups",
     "document_groups",

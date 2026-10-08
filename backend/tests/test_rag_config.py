@@ -1,11 +1,12 @@
 import pytest
 from httpx import AsyncClient
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.models import AuditLog
 from app.llm import rag_config
-from app.llm.rag_config import RagConfig, compute_cost
+from app.llm.rag_config import RagConfig, compute_cost, price_key
 from app.users.models import Role
 from tests.factories import DEFAULT_PASSWORD, bearer, login, make_user
 
@@ -86,3 +87,48 @@ async def test_invalid_config_is_rejected(
 def test_compute_cost_uses_configured_prices() -> None:
     cost = compute_cost(RagConfig(), {"gpt-5-mini": (1_000_000, 100_000), "unknown": (5, 5)})
     assert cost == pytest.approx(0.25 + 0.2)
+
+
+def test_cost_caps_require_a_price_for_every_model() -> None:
+    with pytest.raises(ValidationError) as caught:
+        RagConfig.model_validate({"chat_model": "mystery", "fallback_model": "backup"})
+    assert "backup, mystery" in str(caught.value)
+    uncapped = {"user_daily_cost_usd": 0, "installation_daily_cost_usd": 0}
+    assert RagConfig.model_validate({"chat_model": "mystery", "guardrails": uncapped})
+    priced = RagConfig.model_validate(
+        {
+            "chat_model": "mystery",
+            "prices": {
+                **RagConfig().model_dump()["prices"],
+                "mystery": {"input_per_mtok": 1, "output_per_mtok": 1},
+            },
+        }
+    )
+    assert priced.chat_model == "mystery"
+
+
+async def test_unpriced_model_with_caps_is_rejected_by_the_api(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    token = await _root(client, session)
+    response = await client.post(
+        URL, headers=bearer(token), json={"config": {"guardrails": {"judge_model": "mystery"}}}
+    )
+    assert response.status_code == 422
+    assert "mystery" in response.text
+
+
+def test_price_key_follows_the_reported_model() -> None:
+    config = RagConfig.model_validate(
+        {
+            "prices": {
+                **RagConfig().model_dump()["prices"],
+                "gpt-5": {"input_per_mtok": 1, "output_per_mtok": 1},
+            }
+        }
+    )
+    assert price_key(config, "gpt-5-mini", None) == "gpt-5-mini"
+    assert price_key(config, "gpt-5-mini", {"model_name": "gpt-5-nano"}) == "gpt-5-nano"
+    assert price_key(config, "gpt-5", {"model_name": "gpt-5-mini-2025-08-07"}) == "gpt-5-mini"
+    assert price_key(config, "gpt-5-mini", {"model": "gpt-5-2025-08-07"}) == "gpt-5"
+    assert price_key(config, "gpt-5-mini", {"model_name": "other"}) == "gpt-5-mini"

@@ -3,6 +3,7 @@
 import re
 import uuid
 from collections.abc import Iterable
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -157,6 +158,8 @@ async def update_user(
     if unlock:
         user.locked_until = None
         user.failed_login_count = 0
+        user.chat_locked_until = None
+        user.strike_reset_at = datetime.now(UTC)
         changes["unlocked"] = True
 
     await session.flush()

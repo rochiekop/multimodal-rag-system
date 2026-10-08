@@ -1,4 +1,5 @@
 import json
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
 import pytest
@@ -6,6 +7,8 @@ from fastapi import FastAPI
 from httpx import AsyncClient, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.chat import sse_events
+from app.chat.answer import ChatEvent
 from app.documents.models import Document
 from app.documents.service import page_key
 from tests.factories import (
@@ -60,6 +63,22 @@ async def test_chat_streams_and_records_the_conversation(
     assert follow_up[0][1]["conversation_id"] == cid
     detail = (await client.get(f"/api/conversations/{cid}", headers=bearer(alice))).json()
     assert [m["role"] for m in detail["messages"]] == ["user", "assistant", "user", "assistant"]
+
+
+async def test_conversation_detail_keeps_the_low_confidence_badge(
+    app: FastAPI, client: AsyncClient, session: AsyncSession
+) -> None:
+    _, alice, _ = await _world(app, client, session)
+    app.state.chat_deps = chat_deps(app.state.index, judge='{"grounded": false}')
+    events = await _ask(client, alice, question="How many leave days?")
+    assert events[-1][1]["low_confidence"] is True
+    cid = events[0][1]["conversation_id"]
+
+    detail = (await client.get(f"/api/conversations/{cid}", headers=bearer(alice))).json()
+    assert [(m["role"], m["low_confidence"]) for m in detail["messages"]] == [
+        ("user", False),
+        ("assistant", True),
+    ]
 
 
 async def test_blank_question_is_rejected(
@@ -170,3 +189,20 @@ async def test_stream_ends_with_error_event_when_answer_fails(
     events = await _ask(client, alice, question="How many leave days?")
     assert events[-1][0] == "error"
     assert events[-1][1]["code"] == "answer_failed"
+
+
+async def test_closing_the_sse_stream_closes_the_answer_generator() -> None:
+    closed = False
+
+    async def events() -> AsyncIterator[ChatEvent]:
+        nonlocal closed
+        try:
+            while True:
+                yield ChatEvent("token", {"text": "x"})
+        finally:
+            closed = True
+
+    stream = sse_events(events())
+    await anext(stream)
+    await stream.aclose()
+    assert closed

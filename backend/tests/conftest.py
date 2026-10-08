@@ -59,14 +59,35 @@ def qdrant_url() -> Iterator[str]:
         yield url
 
 
+@pytest.fixture(scope="session")
+def redis_url() -> Iterator[str]:
+    import redis
+
+    container = DockerContainer("redis:8.8.3-alpine").with_exposed_ports(6379)
+    with container:
+        url = f"redis://{container.get_container_host_ip()}:{container.get_exposed_port(6379)}/0"
+        deadline = time.monotonic() + 60
+        while True:
+            try:
+                if redis.Redis.from_url(url).ping():
+                    break
+            except redis.RedisError:
+                pass
+            if time.monotonic() > deadline:
+                raise RuntimeError("Redis test container did not become ready")
+            time.sleep(0.5)
+        yield url
+
+
 @pytest.fixture
-def settings(postgres_url: str, qdrant_url: str, tmp_path: Path) -> Settings:
+def settings(postgres_url: str, qdrant_url: str, redis_url: str, tmp_path: Path) -> Settings:
     return Settings(
         _env_file=None,
         env="test",
         database_url=postgres_url,
         login_max_failed_attempts=3,
         qdrant_url=qdrant_url,
+        redis_url=redis_url,
         qdrant_collection=f"test_{uuid.uuid4().hex[:12]}",
         files_dir=str(tmp_path / "files"),
         embedding_dimensions=8,
@@ -96,18 +117,28 @@ def enqueued() -> list[UUID]:
     return []
 
 
+@pytest.fixture
+def enqueued_evals() -> list[UUID]:
+    return []
+
+
 @pytest_asyncio.fixture
 async def app(
-    settings: Settings, engine: AsyncEngine, enqueued: list[UUID]
+    settings: Settings,
+    engine: AsyncEngine,
+    enqueued: list[UUID],
+    enqueued_evals: list[UUID],
 ) -> AsyncIterator[FastAPI]:
     # Depends on `engine` so tables are truncated after each API test.
     application = create_app(settings)
     application.state.enqueue = enqueued.append
+    application.state.enqueue_eval = enqueued_evals.append
     yield application
     await application.state.engine.dispose()
     index = application.state.index
     if await index.client.collection_exists(index.collection):
         await index.client.delete_collection(index.collection)
+    await application.state.rate_limiter.redis.aclose()
     await index.client.close()
 
 

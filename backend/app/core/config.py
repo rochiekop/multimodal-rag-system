@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://rag:rag@localhost:5432/rag"
     jwt_secret: SecretStr
     jwt_ttl_seconds: int = 8 * 60 * 60
+    session_cookie_secure: bool | None = None  # None: secure only when env == "prod"
     login_max_failed_attempts: int = 5
     login_lockout_seconds: int = 15 * 60
 
@@ -45,6 +46,11 @@ class Settings(BaseSettings):
         if len(value.get_secret_value()) < 32:
             raise ValueError("RAG_JWT_SECRET must be at least 32 characters")
         return value
+
+    def cookie_secure(self) -> bool:
+        if self.session_cookie_secure is not None:
+            return self.session_cookie_secure
+        return self.env == "prod"
 
 
 @lru_cache
