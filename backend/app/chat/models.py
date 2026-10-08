@@ -56,7 +56,7 @@ class Message(Base):
     collection_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
     sources: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
     citations: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
-    # answered | not_found | blocked | support | off_topic | error | cancelled
+    # answered | not_found | small_talk | blocked | support | off_topic | error | cancelled
     outcome: Mapped[str | None] = mapped_column(String(20))
     low_confidence: Mapped[bool] = mapped_column(default=False, server_default=false())
     guardrail: Mapped[dict[str, Any] | None] = mapped_column(JSONB)  # decisive check + flags

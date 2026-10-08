@@ -1,0 +1,248 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="990" viewBox="0 0 1200 990" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <style>
+      .title { font-size: 22px; font-weight: 700; fill: #0f172a; }
+      .h { font-size: 17px; font-weight: 700; fill: #0f172a; }
+      .b { font-size: 13px; font-weight: 700; fill: #0f172a; }
+      .s { font-size: 11px; fill: #334155; }
+      .n { font-size: 11px; font-weight: 700; fill: #ffffff; }
+      .note { font-size: 12px; fill: #475569; font-style: italic; }
+      .line { stroke: #475569; stroke-width: 1.6; fill: none; }
+      .dash { stroke: #94a3b8; stroke-width: 1.4; fill: none; stroke-dasharray: 5 4; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="990" fill="#ffffff"/>
+  <text x="600" y="34" text-anchor="middle" class="title">Multimodal RAG system: how it works</text>
+
+  <!-- ===================== 1. Architecture ===================== -->
+  <text x="20" y="72" class="h">1. Services (one Docker Compose install)</text>
+
+  <!-- Browser -->
+  <rect x="20" y="150" width="140" height="58" rx="8" fill="#f8fafc" stroke="#64748b"/>
+  <text x="90" y="174" text-anchor="middle" class="b">Browser</text>
+  <text x="90" y="192" text-anchor="middle" class="s">user app + admin console</text>
+
+  <!-- Caddy -->
+  <rect x="200" y="150" width="150" height="58" rx="8" fill="#f8fafc" stroke="#64748b"/>
+  <text x="275" y="174" text-anchor="middle" class="b">Caddy</text>
+  <text x="275" y="192" text-anchor="middle" class="s">HTTPS, headers, limits</text>
+
+  <!-- Next.js -->
+  <rect x="400" y="90" width="180" height="58" rx="8" fill="#f8fafc" stroke="#64748b"/>
+  <text x="490" y="114" text-anchor="middle" class="b">Next.js frontend</text>
+  <text x="490" y="132" text-anchor="middle" class="s">pages: /app, /admin</text>
+
+  <!-- FastAPI -->
+  <rect x="400" y="190" width="180" height="58" rx="8" fill="#f8fafc" stroke="#64748b"/>
+  <text x="490" y="214" text-anchor="middle" class="b">FastAPI (api)</text>
+  <text x="490" y="232" text-anchor="middle" class="s">/api: auth, chat, admin</text>
+
+  <!-- Phoenix -->
+  <rect x="200" y="270" width="150" height="58" rx="8" fill="#f8fafc" stroke="#64748b"/>
+  <text x="275" y="294" text-anchor="middle" class="b">Phoenix</text>
+  <text x="275" y="312" text-anchor="middle" class="s">/phoenix: LLM traces</text>
+
+  <!-- Data group -->
+  <rect x="625" y="82" width="200" height="262" rx="10" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="725" y="102" text-anchor="middle" class="b">Data</text>
+  <rect x="640" y="112" width="170" height="46" rx="6" fill="#ffffff" stroke="#94a3b8"/>
+  <text x="725" y="132" text-anchor="middle" class="b">PostgreSQL</text>
+  <text x="725" y="148" text-anchor="middle" class="s">users, chats, audit, config</text>
+  <rect x="640" y="166" width="170" height="46" rx="6" fill="#ffffff" stroke="#94a3b8"/>
+  <text x="725" y="186" text-anchor="middle" class="b">Qdrant</text>
+  <text x="725" y="202" text-anchor="middle" class="s">search index (chunks)</text>
+  <rect x="640" y="220" width="170" height="46" rx="6" fill="#ffffff" stroke="#94a3b8"/>
+  <text x="725" y="240" text-anchor="middle" class="b">Redis</text>
+  <text x="725" y="256" text-anchor="middle" class="s">job queue, rate limits</text>
+  <rect x="640" y="274" width="170" height="46" rx="6" fill="#ffffff" stroke="#94a3b8"/>
+  <text x="725" y="294" text-anchor="middle" class="b">Files volume</text>
+  <text x="725" y="310" text-anchor="middle" class="s">originals, page images</text>
+
+  <!-- Workers group -->
+  <rect x="860" y="120" width="170" height="170" rx="10" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="945" y="140" text-anchor="middle" class="b">Background workers</text>
+  <rect x="872" y="152" width="146" height="54" rx="6" fill="#ffffff" stroke="#94a3b8"/>
+  <text x="945" y="174" text-anchor="middle" class="b">worker</text>
+  <text x="945" y="192" text-anchor="middle" class="s">document ingestion</text>
+  <rect x="872" y="218" width="146" height="54" rx="6" fill="#ffffff" stroke="#94a3b8"/>
+  <text x="945" y="240" text-anchor="middle" class="b">worker-eval</text>
+  <text x="945" y="258" text-anchor="middle" class="s">evaluation runs</text>
+
+  <!-- External group -->
+  <rect x="1060" y="120" width="125" height="170" rx="10" fill="#fff7ed" stroke="#fb923c"/>
+  <text x="1122" y="140" text-anchor="middle" class="b">External</text>
+  <rect x="1070" y="152" width="105" height="54" rx="6" fill="#ffffff" stroke="#fb923c"/>
+  <text x="1122" y="174" text-anchor="middle" class="b">OpenAI</text>
+  <text x="1122" y="192" text-anchor="middle" class="s">LLM, embeddings</text>
+  <rect x="1070" y="218" width="105" height="54" rx="6" fill="#ffffff" stroke="#fb923c"/>
+  <text x="1122" y="240" text-anchor="middle" class="b">ClamAV</text>
+  <text x="1122" y="258" text-anchor="middle" class="s">malware scan</text>
+
+  <!-- Architecture arrows -->
+  <line x1="160" y1="179" x2="198" y2="179" class="line" marker-end="url(#arrow)"/>
+  <polyline points="350,170 375,170 375,119 398,119" class="line" marker-end="url(#arrow)"/>
+  <polyline points="350,188 375,188 375,219 398,219" class="line" marker-end="url(#arrow)"/>
+  <line x1="275" y1="208" x2="275" y2="268" class="line" marker-end="url(#arrow)"/>
+  <line x1="580" y1="219" x2="623" y2="219" class="line" marker-end="url(#arrow)"/>
+  <line x1="825" y1="205" x2="858" y2="205" class="line" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <line x1="1030" y1="205" x2="1058" y2="205" class="line" marker-end="url(#arrow)"/>
+  <polyline points="490,248 490,299 352,299" class="dash" marker-end="url(#arrow)"/>
+  <text x="498" y="290" class="s">traces</text>
+  <path d="M580,206 C 700,60 1000,60 1100,150" class="dash" marker-end="url(#arrow)"/>
+  <text x="840" y="84" class="s">answers, moderation</text>
+
+  <!-- ===================== 2. Ingestion ===================== -->
+  <text x="20" y="384" class="h">2. Adding a document (admin uploads a file)</text>
+
+  <g>
+    <rect x="10" y="404" width="130" height="78" rx="8" fill="#fef3c7" stroke="#d97706"/>
+    <circle cx="26" cy="420" r="10" fill="#d97706"/><text x="26" y="424" text-anchor="middle" class="n">1</text>
+    <text x="80" y="438" text-anchor="middle" class="b">Upload</text>
+    <text x="75" y="456" text-anchor="middle" class="s">type, size and</text>
+    <text x="75" y="470" text-anchor="middle" class="s">duplicate checks</text>
+
+    <rect x="160" y="404" width="130" height="78" rx="8" fill="#fef3c7" stroke="#d97706"/>
+    <circle cx="176" cy="420" r="10" fill="#d97706"/><text x="176" y="424" text-anchor="middle" class="n">2</text>
+    <text x="230" y="438" text-anchor="middle" class="b">Queue</text>
+    <text x="225" y="456" text-anchor="middle" class="s">file saved, job</text>
+    <text x="225" y="470" text-anchor="middle" class="s">sent via Redis</text>
+
+    <rect x="310" y="404" width="130" height="78" rx="8" fill="#fef3c7" stroke="#d97706"/>
+    <circle cx="326" cy="420" r="10" fill="#d97706"/><text x="326" y="424" text-anchor="middle" class="n">3</text>
+    <text x="380" y="438" text-anchor="middle" class="b">Scan</text>
+    <text x="375" y="456" text-anchor="middle" class="s">ClamAV checks</text>
+    <text x="375" y="470" text-anchor="middle" class="s">for malware</text>
+
+    <rect x="460" y="404" width="130" height="78" rx="8" fill="#fef3c7" stroke="#d97706"/>
+    <circle cx="476" cy="420" r="10" fill="#d97706"/><text x="476" y="424" text-anchor="middle" class="n">4</text>
+    <text x="530" y="438" text-anchor="middle" class="b">Parse</text>
+    <text x="525" y="456" text-anchor="middle" class="s">Docling: text,</text>
+    <text x="525" y="470" text-anchor="middle" class="s">tables, OCR, pages</text>
+
+    <rect x="610" y="404" width="130" height="78" rx="8" fill="#fef3c7" stroke="#d97706"/>
+    <circle cx="626" cy="420" r="10" fill="#d97706"/><text x="626" y="424" text-anchor="middle" class="n">5</text>
+    <text x="680" y="438" text-anchor="middle" class="b">Describe</text>
+    <text x="675" y="456" text-anchor="middle" class="s">figures turned into</text>
+    <text x="675" y="470" text-anchor="middle" class="s">text (OpenAI vision)</text>
+
+    <rect x="760" y="404" width="130" height="78" rx="8" fill="#fef3c7" stroke="#d97706"/>
+    <circle cx="776" cy="420" r="10" fill="#d97706"/><text x="776" y="424" text-anchor="middle" class="n">6</text>
+    <text x="830" y="438" text-anchor="middle" class="b">Chunk</text>
+    <text x="825" y="456" text-anchor="middle" class="s">~500-token pieces</text>
+    <text x="825" y="470" text-anchor="middle" class="s">with page + region</text>
+
+    <rect x="910" y="404" width="130" height="78" rx="8" fill="#fef3c7" stroke="#d97706"/>
+    <circle cx="926" cy="420" r="10" fill="#d97706"/><text x="926" y="424" text-anchor="middle" class="n">7</text>
+    <text x="980" y="438" text-anchor="middle" class="b">Embed</text>
+    <text x="975" y="456" text-anchor="middle" class="s">meaning vectors +</text>
+    <text x="975" y="470" text-anchor="middle" class="s">keyword (BM25)</text>
+
+    <rect x="1060" y="404" width="130" height="78" rx="8" fill="#fef3c7" stroke="#d97706"/>
+    <circle cx="1076" cy="420" r="10" fill="#d97706"/><text x="1076" y="424" text-anchor="middle" class="n">8</text>
+    <text x="1130" y="438" text-anchor="middle" class="b">Index</text>
+    <text x="1125" y="456" text-anchor="middle" class="s">Qdrant, tagged with</text>
+    <text x="1125" y="470" text-anchor="middle" class="s">groups → "Ready"</text>
+
+    <line x1="140" y1="443" x2="158" y2="443" class="line" marker-end="url(#arrow)"/>
+    <line x1="290" y1="443" x2="308" y2="443" class="line" marker-end="url(#arrow)"/>
+    <line x1="440" y1="443" x2="458" y2="443" class="line" marker-end="url(#arrow)"/>
+    <line x1="590" y1="443" x2="608" y2="443" class="line" marker-end="url(#arrow)"/>
+    <line x1="740" y1="443" x2="758" y2="443" class="line" marker-end="url(#arrow)"/>
+    <line x1="890" y1="443" x2="908" y2="443" class="line" marker-end="url(#arrow)"/>
+    <line x1="1040" y1="443" x2="1058" y2="443" class="line" marker-end="url(#arrow)"/>
+  </g>
+  <text x="20" y="506" class="note">Steps 3–8 run on the background worker. Failures can be retried from Admin → Documents; the chunk inspector shows the result.</text>
+
+  <!-- ===================== 3. Question answering ===================== -->
+  <text x="20" y="550" class="h">3. Asking a question (user in the chat)</text>
+
+  <g>
+    <!-- Row 1 -->
+    <rect x="31" y="570" width="210" height="84" rx="8" fill="#eff6ff" stroke="#3b82f6"/>
+    <circle cx="49" cy="588" r="10" fill="#3b82f6"/><text x="49" y="592" text-anchor="middle" class="n">1</text>
+    <text x="136" y="604" text-anchor="middle" class="b">Ask</text>
+    <text x="136" y="624" text-anchor="middle" class="s">question + chosen collections</text>
+    <text x="136" y="640" text-anchor="middle" class="s">(sent over HTTPS via Caddy)</text>
+
+    <rect x="263" y="570" width="210" height="84" rx="8" fill="#eff6ff" stroke="#3b82f6"/>
+    <circle cx="281" cy="588" r="10" fill="#3b82f6"/><text x="281" y="592" text-anchor="middle" class="n">2</text>
+    <text x="368" y="604" text-anchor="middle" class="b">Pre-checks</text>
+    <text x="368" y="624" text-anchor="middle" class="s">rate limit, question length,</text>
+    <text x="368" y="640" text-anchor="middle" class="s">daily cost cap, chat lock</text>
+
+    <rect x="495" y="570" width="210" height="84" rx="8" fill="#eff6ff" stroke="#3b82f6"/>
+    <circle cx="513" cy="588" r="10" fill="#3b82f6"/><text x="513" y="592" text-anchor="middle" class="n">3</text>
+    <text x="600" y="604" text-anchor="middle" class="b">Input guardrails</text>
+    <text x="600" y="624" text-anchor="middle" class="s">moderation, injection, scope;</text>
+    <text x="600" y="640" text-anchor="middle" class="s">"hello" gets a friendly reply</text>
+
+    <rect x="727" y="570" width="210" height="84" rx="8" fill="#eff6ff" stroke="#3b82f6"/>
+    <circle cx="745" cy="588" r="10" fill="#3b82f6"/><text x="745" y="592" text-anchor="middle" class="n">4</text>
+    <text x="832" y="604" text-anchor="middle" class="b">Rewrite</text>
+    <text x="832" y="624" text-anchor="middle" class="s">follow-ups become standalone</text>
+    <text x="832" y="640" text-anchor="middle" class="s">questions (uses chat history)</text>
+
+    <rect x="959" y="570" width="210" height="84" rx="8" fill="#eff6ff" stroke="#3b82f6"/>
+    <circle cx="977" cy="588" r="10" fill="#3b82f6"/><text x="977" y="592" text-anchor="middle" class="n">5</text>
+    <text x="1064" y="604" text-anchor="middle" class="b">Hybrid search</text>
+    <text x="1064" y="624" text-anchor="middle" class="s">meaning + keyword search in</text>
+    <text x="1064" y="640" text-anchor="middle" class="s">Qdrant, only your groups' docs</text>
+
+    <!-- Row 2 -->
+    <rect x="31" y="720" width="210" height="84" rx="8" fill="#eff6ff" stroke="#3b82f6"/>
+    <circle cx="49" cy="738" r="10" fill="#3b82f6"/><text x="49" y="742" text-anchor="middle" class="n">6</text>
+    <text x="136" y="754" text-anchor="middle" class="b">Re-check + rerank</text>
+    <text x="136" y="774" text-anchor="middle" class="s">access re-checked in Postgres;</text>
+    <text x="136" y="790" text-anchor="middle" class="s">best passages ranked first</text>
+
+    <rect x="263" y="720" width="210" height="84" rx="8" fill="#eff6ff" stroke="#3b82f6"/>
+    <circle cx="281" cy="738" r="10" fill="#3b82f6"/><text x="281" y="742" text-anchor="middle" class="n">7</text>
+    <text x="368" y="754" text-anchor="middle" class="b">Enough evidence?</text>
+    <text x="368" y="774" text-anchor="middle" class="s">no → "I couldn't find this"</text>
+    <text x="368" y="790" text-anchor="middle" class="s">+ closest matches</text>
+
+    <rect x="495" y="720" width="210" height="84" rx="8" fill="#eff6ff" stroke="#3b82f6"/>
+    <circle cx="513" cy="738" r="10" fill="#3b82f6"/><text x="513" y="742" text-anchor="middle" class="n">8</text>
+    <text x="600" y="754" text-anchor="middle" class="b">Answer</text>
+    <text x="600" y="774" text-anchor="middle" class="s">LLM writes from the passages,</text>
+    <text x="600" y="790" text-anchor="middle" class="s">streamed with [1] [2] citations</text>
+
+    <rect x="727" y="720" width="210" height="84" rx="8" fill="#eff6ff" stroke="#3b82f6"/>
+    <circle cx="745" cy="738" r="10" fill="#3b82f6"/><text x="745" y="742" text-anchor="middle" class="n">9</text>
+    <text x="832" y="754" text-anchor="middle" class="b">Output guard</text>
+    <text x="832" y="774" text-anchor="middle" class="s">PII redaction, citation check,</text>
+    <text x="832" y="790" text-anchor="middle" class="s">system-prompt leak block</text>
+
+    <rect x="959" y="720" width="210" height="84" rx="8" fill="#eff6ff" stroke="#3b82f6"/>
+    <circle cx="977" cy="738" r="10" fill="#3b82f6"/><text x="977" y="742" text-anchor="middle" class="n">10</text>
+    <text x="1064" y="754" text-anchor="middle" class="b">Check + save</text>
+    <text x="1064" y="774" text-anchor="middle" class="s">groundedness judge, cost,</text>
+    <text x="1064" y="790" text-anchor="middle" class="s">audit log, Phoenix trace</text>
+
+    <!-- Arrows row 1 -->
+    <line x1="241" y1="612" x2="261" y2="612" class="line" marker-end="url(#arrow)"/>
+    <line x1="473" y1="612" x2="493" y2="612" class="line" marker-end="url(#arrow)"/>
+    <line x1="705" y1="612" x2="725" y2="612" class="line" marker-end="url(#arrow)"/>
+    <line x1="937" y1="612" x2="957" y2="612" class="line" marker-end="url(#arrow)"/>
+    <!-- Wrap 5 -> 6 -->
+    <polyline points="1064,654 1064,687 136,687 136,718" class="line" marker-end="url(#arrow)"/>
+    <!-- Arrows row 2 -->
+    <line x1="241" y1="762" x2="261" y2="762" class="line" marker-end="url(#arrow)"/>
+    <line x1="473" y1="762" x2="493" y2="762" class="line" marker-end="url(#arrow)"/>
+    <line x1="705" y1="762" x2="725" y2="762" class="line" marker-end="url(#arrow)"/>
+    <line x1="937" y1="762" x2="957" y2="762" class="line" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- Result -->
+  <rect x="31" y="840" width="1138" height="62" rx="8" fill="#f8fafc" stroke="#64748b"/>
+  <text x="600" y="866" text-anchor="middle" class="b">The user sees the answer word by word, with citation badges that open the exact page with the passage highlighted.</text>
+  <text x="600" y="886" text-anchor="middle" class="s">Blocked, off-topic or not-found questions get a clear notice instead. 👍/👎 feedback and low-confidence answers go to Admin → Review queue.</text>
+  <line x1="1064" y1="804" x2="1064" y2="838" class="line" marker-end="url(#arrow)"/>
+
+  <text x="20" y="940" class="note">Evaluation: Admin → Evaluation replays test-set questions through steps 2–10 on the eval worker and scores them (Ragas), so config changes can be compared before activation.</text>
+  <text x="20" y="962" class="note">Every admin change, sign-in and sensitive view is written to the append-only audit log.</text>
+</svg>

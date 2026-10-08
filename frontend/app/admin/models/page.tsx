@@ -71,6 +71,7 @@ const schema = z.object({
   system_prompt: z.string().min(1).max(8000),
   rewrite_prompt: z.string().min(1).max(4000),
   not_found_message: z.string().min(1).max(500),
+  greeting_message: z.string().min(1).max(500),
   prices: z.string().refine((v) => parsePrices(v) !== null, PRICE_HINT),
   note: z.string().max(500),
 })
@@ -89,6 +90,7 @@ const toValues = (c: RagConfig): Values => ({
   system_prompt: c.system_prompt,
   rewrite_prompt: c.rewrite_prompt,
   not_found_message: c.not_found_message,
+  greeting_message: c.greeting_message,
   prices: JSON.stringify(c.prices, null, 2),
   note: "",
 })
@@ -109,6 +111,7 @@ const PROMPT_FIELDS = [
   ["system_prompt", "System prompt", 8],
   ["rewrite_prompt", "Rewrite prompt", 3],
   ["not_found_message", "“Not found” message", 2],
+  ["greeting_message", "Reply to greetings (hello, hi…)", 2],
 ] as const
 
 function ModelsEditor() {

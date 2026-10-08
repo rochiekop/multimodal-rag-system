@@ -19,6 +19,7 @@ const config = {
   system_prompt: "Answer from sources.",
   rewrite_prompt: "Rewrite.",
   not_found_message: "Not found.",
+  greeting_message: "Hi!",
   prices: { "gpt-5-mini": { input_per_mtok: 0.25, output_per_mtok: 2 } },
   guardrails,
 }
