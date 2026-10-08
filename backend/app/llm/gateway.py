@@ -34,7 +34,7 @@ def get_embeddings(settings: Settings, api_key: SecretStr | None = None) -> Embe
     return OpenAIEmbeddings(
         model=settings.embedding_model,
         dimensions=settings.embedding_dimensions,
-        api_key=_api_key(settings, api_key),
+        api_key=_api_key(settings, api_key),  # type: ignore[call-arg]  # pydantic alias for openai_api_key
         max_retries=3,
     )
 

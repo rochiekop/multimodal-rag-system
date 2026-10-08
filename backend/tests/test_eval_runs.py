@@ -283,3 +283,39 @@ async def test_runs_api(
     await session.commit()
     configs = (await client.get("/api/admin/rag-configs", headers=h)).json()
     assert configs == []  # no versions yet; latest_eval is attached per version when present
+
+
+async def test_stale_running_runs_are_reaped(session: AsyncSession) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
+    eval_set = EvalSet(name="Stale")
+    session.add(eval_set)
+    await session.flush()
+    stale = EvalRun(
+        eval_set_id=eval_set.id,
+        status="running",
+        case_count=1,
+        summary={},
+        config={},
+        started_at=now - timedelta(hours=7),
+    )
+    fresh = EvalRun(
+        eval_set_id=eval_set.id,
+        status="running",
+        case_count=1,
+        summary={},
+        config={},
+        started_at=now - timedelta(hours=1),
+    )
+    session.add_all([stale, fresh])
+    await session.commit()
+
+    assert await runs.reap_stale_runs(session, now=now) == 1
+    await session.commit()
+    await session.refresh(stale)
+    await session.refresh(fresh)
+    assert stale.status == "failed"
+    assert stale.error == "Timed out: the evaluation worker stopped"
+    assert stale.finished_at == now
+    assert fresh.status == "running"

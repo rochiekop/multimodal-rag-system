@@ -22,7 +22,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { adminApi } from "@/lib/admin-api"
 import { ApiError } from "@/lib/api"
-import { traceUrl } from "@/lib/config"
+import { phoenixUrl } from "@/lib/config"
 import { formatDateTime } from "@/lib/format"
 
 /** One answer under review. Opening it is audited by the backend (spec §6.6). */
@@ -64,7 +64,7 @@ export function ReviewSheet({
       toast.error(e instanceof ApiError ? e.message : "Could not add the case"),
   })
   const answer = data?.answer
-  const trace = traceUrl(answer?.trace_id ?? null)
+  const phoenix = phoenixUrl()
 
   return (
     <Sheet open={!!messageId} onOpenChange={onOpenChange}>
@@ -139,17 +139,27 @@ export function ReviewSheet({
             )}
             <p className="text-muted-foreground">
               Trace:{" "}
-              {trace ? (
-                <a
-                  className="underline"
-                  href={trace}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  open in Phoenix
-                </a>
+              {answer.trace_id ? (
+                <>
+                  <span className="select-all font-mono text-xs">
+                    {answer.trace_id}
+                  </span>
+                  {phoenix && (
+                    <>
+                      {" "}
+                      <a
+                        className="underline"
+                        href={phoenix}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        open Phoenix
+                      </a>
+                    </>
+                  )}
+                </>
               ) : (
-                (answer.trace_id ?? "—")
+                "—"
               )}
             </p>
             <Separator />

@@ -4,6 +4,7 @@ import csv
 import io
 import uuid
 from collections.abc import Iterable
+from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
@@ -121,12 +122,12 @@ async def delete_set(session: AsyncSession, actor: User, set_id: uuid.UUID) -> N
     )
 
 
-async def _missing(session: AsyncSession, model: type, ids: Iterable[uuid.UUID]) -> bool:
+async def _missing(session: AsyncSession, model: Any, ids: Iterable[uuid.UUID]) -> bool:
     wanted = set(ids)
     if not wanted:
         return False
     found = await session.scalar(
-        select(func.count()).select_from(model).where(model.id.in_(wanted))  # type: ignore[attr-defined]
+        select(func.count()).select_from(model).where(model.id.in_(wanted))
     )
     return int(found or 0) != len(wanted)
 
@@ -205,7 +206,7 @@ def _names(value: str) -> list[str]:
 
 def _sources(value: str) -> list[dict[str, object]]:
     """ "<doc_id>[:page];<doc_id>" -> [{"doc_id": ..., "page": ...}]."""
-    sources = []
+    sources: list[dict[str, object]] = []
     for part in value.split(";"):
         part = part.strip()
         if not part:

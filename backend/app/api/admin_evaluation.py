@@ -32,7 +32,7 @@ def _http_error(exc: service.EvaluationError) -> HTTPException:
     return api_error(_STATUS.get(type(exc), 400), exc.code, exc.message)
 
 
-def _set_out(eval_set, counts: dict[uuid.UUID, int]) -> EvalSetOut:  # type: ignore[no-untyped-def]
+def _set_out(eval_set, counts: dict[uuid.UUID, int]) -> EvalSetOut:
     out = EvalSetOut.model_validate(eval_set)
     out.case_count = counts.get(eval_set.id, 0)
     return out
@@ -170,6 +170,8 @@ async def start_run(
 async def list_runs(
     _: AdminUser, session: SessionDep, eval_set_id: uuid.UUID | None = None
 ) -> list[EvalRunOut]:
+    if await runs.reap_stale_runs(session):
+        await session.commit()
     return [EvalRunOut.model_validate(r) for r in await runs.list_runs(session, eval_set_id)]
 
 
@@ -185,6 +187,8 @@ async def compare_runs(
 
 @router.get("/eval-runs/{run_id}")
 async def get_run(run_id: uuid.UUID, _: AdminUser, session: SessionDep) -> EvalRunDetail:
+    if await runs.reap_stale_runs(session):
+        await session.commit()
     try:
         run, results = await runs.get_run(session, run_id)
     except service.EvaluationError as exc:

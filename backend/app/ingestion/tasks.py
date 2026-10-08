@@ -30,6 +30,8 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
+    # Must exceed the task time_limit (3600 s) or Redis redelivers a running acks_late task.
+    broker_transport_options={"visibility_timeout": 7200},
 )
 
 
@@ -78,7 +80,11 @@ async def _run(version_id: uuid.UUID, final_attempt: bool) -> DocumentStatus:
         await engine.dispose()
 
 
-@celery_app.task(bind=True, name="ingestion.ingest_version", max_retries=MAX_RETRIES)
+# A hard limit kills a runaway parse; the version stays in its stage and Retry recovers it
+# after STUCK_AFTER.
+@celery_app.task(
+    bind=True, name="ingestion.ingest_version", max_retries=MAX_RETRIES, time_limit=3600
+)
 def ingest_version(self: Any, version_id: str) -> str:
     final_attempt = self.request.retries >= MAX_RETRIES
     try:

@@ -62,7 +62,7 @@ MAX_EXPORT_ROWS = 100_000
 _FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
 
 
-def _filtered(filters: AuditFilters) -> Select[tuple[AuditLog]]:
+def _filtered(filters: AuditFilters) -> Select[AuditLog]:
     query = select(AuditLog)
     if filters.actor:
         query = query.where(func.lower(AuditLog.actor_username) == filters.actor.strip().lower())

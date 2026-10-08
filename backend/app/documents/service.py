@@ -320,7 +320,8 @@ async def restore_document(
     return document
 
 
-STUCK_AFTER = timedelta(minutes=30)
+# Longer than the 60-minute ingestion task limit, so Retry never races a live parse.
+STUCK_AFTER = timedelta(minutes=70)
 _IN_FLIGHT = {
     DocumentStatus.SCANNING.value,
     DocumentStatus.PARSING.value,

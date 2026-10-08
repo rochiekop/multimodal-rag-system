@@ -33,6 +33,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "mypy>=2.4.0",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.10",
@@ -69,3 +70,15 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cpu" }
 torchvision = { index = "pytorch-cpu" }
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app"]
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["celery.*", "docling.*", "docling_core.*", "ragas.*", "fastembed.*", "phoenix.*", "openinference.*", "pythonjsonlogger.*"]
+ignore_missing_imports = true

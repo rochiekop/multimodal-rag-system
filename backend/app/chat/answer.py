@@ -9,7 +9,7 @@ still gets its answer recorded (outcome "cancelled") and metered."""
 import logging
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -373,7 +373,7 @@ async def answer(
     conversation_id: uuid.UUID,
     question: str,
     collection_ids: Sequence[uuid.UUID] = (),
-) -> AsyncIterator[ChatEvent]:
+) -> AsyncGenerator[ChatEvent, None]:
     """The caller has already checked ownership and the pre-flight limits."""
     started = time.monotonic()
     async with sessionmaker() as session:

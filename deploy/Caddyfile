@@ -1,0 +1,68 @@
+# Single entry point. RAG_DOMAIN: a public DNS name (automatic Let's Encrypt), "localhost" or an
+# intranet name (Caddy's internal CA), or ":80" for plain HTTP (then set
+# RAG_SESSION_COOKIE_SECURE=false in deploy/.env).
+{$RAG_DOMAIN:localhost} {
+	# A client must never choose the request ID written into audit rows.
+	request_header X-Request-ID {http.request.uuid}
+
+	# Compress documents only; never the answer stream (text/event-stream) or binaries.
+	encode zstd gzip {
+		match {
+			header Content-Type text/html*
+			header Content-Type text/css*
+			header Content-Type text/plain*
+			header Content-Type text/csv*
+			header Content-Type application/javascript*
+			header Content-Type application/json*
+			header Content-Type image/svg+xml*
+		}
+	}
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+	}
+
+	# Phoenix (LLM traces) has no login of its own: basic auth, and no app CSP. It builds its links
+	# with the /phoenix prefix (PHOENIX_HOST_ROOT_PATH) but serves its routes without it, so strip it.
+	handle_path /phoenix* {
+		basic_auth {
+			{$PHOENIX_BASIC_AUTH_USER} {$PHOENIX_BASIC_AUTH_HASH}
+		}
+		reverse_proxy phoenix:6006
+	}
+
+	@app not path /phoenix*
+	header @app {
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+		X-Frame-Options "DENY"
+	}
+
+	@upload {
+		method POST
+		path_regexp ^/api/admin/collections/[^/]+/documents$
+	}
+	handle @upload {
+		request_body {
+			max_size 500MB
+		}
+		reverse_proxy api:8000
+	}
+
+	handle /api/* {
+		request_body {
+			max_size 10MB
+		}
+		# flush_interval -1: stream answers token by token.
+		reverse_proxy api:8000 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

@@ -12,3 +12,5 @@ deploy/.env
 Thumbs.db
 .idea/
 .vscode/
+deploy/.env.verify
+backups/

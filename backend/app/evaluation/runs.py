@@ -4,11 +4,11 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from statistics import mean
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import CursorResult, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.audit import service as audit
@@ -23,9 +23,23 @@ from app.users.models import Group, User
 
 logger = logging.getLogger(__name__)
 REGRESSION_DROP = 0.1
+RUN_TIMEOUT = timedelta(hours=6)
+TIMED_OUT = "Timed out: the evaluation worker stopped"
 # Per-case 0/1 metrics averaged into a summary rate: "I don't know" accuracy on unanswerable
 # cases, and the share of answerable cases that got a cited answer. Both feed the score.
 RATES = {"idk_accuracy": "idk_correct", "answered_rate": "answered"}
+
+
+async def reap_stale_runs(session: AsyncSession, now: datetime | None = None) -> int:
+    """Fail runs stuck in `running` past RUN_TIMEOUT. Runs are acked early, so a worker that
+    died mid-run would otherwise leave them running forever. Flushes; the caller commits."""
+    now = now or datetime.now(UTC)
+    result = await session.execute(
+        update(EvalRun)
+        .where(EvalRun.status == "running", EvalRun.started_at < now - RUN_TIMEOUT)
+        .values(status="failed", error=TIMED_OUT, finished_at=now)
+    )
+    return cast(CursorResult[Any], result).rowcount or 0
 
 
 async def create_run(
@@ -38,6 +52,7 @@ async def create_run(
     cases = await service.list_cases(session, eval_set.id)
     if not cases:
         raise service.InvalidCase("This eval set has no cases")
+    version: int | None
     if rag_config_id is not None:
         row = await session.get(RagConfigVersion, rag_config_id)
         if row is None:
@@ -82,14 +97,14 @@ def _percentile(values: Sequence[int], fraction: float) -> int:
 
 
 def _rate(results: Sequence[EvalResult], metric: str) -> float | None:
-    values = [r.metrics.get(metric) for r in results if r.metrics.get(metric) is not None]
+    values = [v for r in results if (v := r.metrics.get(metric)) is not None]
     return round(mean(float(v) for v in values), 4) if values else None
 
 
 def summarize(results: Sequence[EvalResult]) -> dict[str, Any]:
     metric_means: dict[str, float] = {}
     for name in METRICS:
-        values = [r.metrics.get(name) for r in results if r.metrics.get(name) is not None]
+        values = [v for r in results if (v := r.metrics.get(name)) is not None]
         if values:
             metric_means[name] = round(mean(float(v) for v in values), 4)
     rates = {key: _rate(results, metric) for key, metric in RATES.items()}
