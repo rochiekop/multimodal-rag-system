@@ -71,7 +71,8 @@ class RequestIdMiddleware:
             )
             await send_with_id({"type": "http.response.body", "body": body})
         finally:
-            access_logger.info(
+            access_logger.log(
+                logging.DEBUG if scope.get("path") == "/api/health" else logging.INFO,
                 "request",
                 extra={
                     "method": scope.get("method"),

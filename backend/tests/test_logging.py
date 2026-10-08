@@ -81,8 +81,26 @@ async def test_unhandled_error_returns_json_500_with_request_id(app, caplog) -> 
 async def test_access_log_line_per_request(client: AsyncClient, caplog) -> None:
     with caplog.at_level(logging.INFO, logger="app.access"):
         await client.get("/api/health", headers={"X-Request-ID": "req-log"})
+        await client.get("/api/no-such-route", headers={"X-Request-ID": "req-log"})
     records = [r for r in caplog.records if r.name == "app.access"]
     assert len(records) == 1
     record = records[0]
-    assert (record.method, record.path, record.status) == ("GET", "/api/health", 200)
+    assert (record.method, record.path, record.status) == ("GET", "/api/no-such-route", 404)
     assert record.duration_ms >= 0
+
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger="app.access"):
+        await client.get("/api/health")
+    assert [r.path for r in caplog.records if r.name == "app.access"] == ["/api/health"]
+
+
+def test_bm25_path_resolution(tmp_path, monkeypatch) -> None:
+    from app.llm import sparse
+
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path))
+    assert sparse.cached_bm25_path() is None
+    repo = tmp_path / "models--Qdrant--bm25"
+    (repo / "snapshots" / "abc").mkdir(parents=True)
+    (repo / "refs").mkdir()
+    (repo / "refs" / "main").write_text("abc")
+    assert sparse.cached_bm25_path() == str(repo / "snapshots" / "abc")
