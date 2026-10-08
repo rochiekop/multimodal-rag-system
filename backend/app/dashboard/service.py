@@ -3,7 +3,7 @@
 from datetime import UTC, date, datetime, time, timedelta
 
 from pydantic import BaseModel
-from sqlalchemy import Date, cast, func, select
+from sqlalchemy import ColumnElement, Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.models import Conversation, Message
@@ -35,7 +35,7 @@ def _rate(part: int, whole: int) -> float | None:
     return part / whole if whole else None
 
 
-def _day(column: object) -> object:
+def _day(column: object) -> ColumnElement[date]:
     return cast(func.timezone("UTC", column), Date)
 
 

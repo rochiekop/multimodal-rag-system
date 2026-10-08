@@ -32,7 +32,7 @@ def _http_error(exc: service.EvaluationError) -> HTTPException:
     return api_error(_STATUS.get(type(exc), 400), exc.code, exc.message)
 
 
-def _set_out(eval_set, counts: dict[uuid.UUID, int]) -> EvalSetOut:  # type: ignore[no-untyped-def]
+def _set_out(eval_set, counts: dict[uuid.UUID, int]) -> EvalSetOut:
     out = EvalSetOut.model_validate(eval_set)
     out.case_count = counts.get(eval_set.id, 0)
     return out

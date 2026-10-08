@@ -6,7 +6,7 @@ import contextlib
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -44,7 +44,7 @@ def _sse(event: ChatEvent) -> str:
     return f"event: {event.event}\ndata: {json.dumps(event.data, ensure_ascii=False)}\n\n"
 
 
-async def sse_events(events: AsyncIterator[ChatEvent]) -> AsyncIterator[str]:
+async def sse_events(events: AsyncGenerator[ChatEvent, None]) -> AsyncIterator[str]:
     """Events as SSE text. Closing this closes `events` too, so a client that disconnects
     still runs the answer's save instead of waiting for garbage collection."""
     try:

@@ -37,7 +37,7 @@ class RateLimiter:
         bucket = f"rl:{key}:{int(time.time() // window_seconds)}"
         try:
             async with self.redis.pipeline(transaction=True) as pipe:
-                count, _ = await pipe.incr(bucket).expire(bucket, window_seconds).execute()
+                count, _ = await pipe.incr(bucket).expire(bucket, window_seconds).execute()  # type: ignore[union-attr]  # redis-py types incr() as Awaitable | Any
         except (RedisError, OSError):
             logger.warning("Rate limiter unavailable; allowing the request", exc_info=True)
             return True

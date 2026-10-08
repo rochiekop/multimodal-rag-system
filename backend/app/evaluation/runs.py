@@ -6,9 +6,9 @@ import uuid
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from statistics import mean
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import CursorResult, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.audit import service as audit
@@ -39,7 +39,7 @@ async def reap_stale_runs(session: AsyncSession, now: datetime | None = None) ->
         .where(EvalRun.status == "running", EvalRun.started_at < now - RUN_TIMEOUT)
         .values(status="failed", error=TIMED_OUT, finished_at=now)
     )
-    return result.rowcount or 0
+    return cast(CursorResult[Any], result).rowcount or 0
 
 
 async def create_run(
@@ -52,6 +52,7 @@ async def create_run(
     cases = await service.list_cases(session, eval_set.id)
     if not cases:
         raise service.InvalidCase("This eval set has no cases")
+    version: int | None
     if rag_config_id is not None:
         row = await session.get(RagConfigVersion, rag_config_id)
         if row is None:
@@ -96,14 +97,14 @@ def _percentile(values: Sequence[int], fraction: float) -> int:
 
 
 def _rate(results: Sequence[EvalResult], metric: str) -> float | None:
-    values = [r.metrics.get(metric) for r in results if r.metrics.get(metric) is not None]
+    values = [v for r in results if (v := r.metrics.get(metric)) is not None]
     return round(mean(float(v) for v in values), 4) if values else None
 
 
 def summarize(results: Sequence[EvalResult]) -> dict[str, Any]:
     metric_means: dict[str, float] = {}
     for name in METRICS:
-        values = [r.metrics.get(name) for r in results if r.metrics.get(name) is not None]
+        values = [v for r in results if (v := r.metrics.get(name)) is not None]
         if values:
             metric_means[name] = round(mean(float(v) for v in values), 4)
     rates = {key: _rate(results, metric) for key, metric in RATES.items()}
