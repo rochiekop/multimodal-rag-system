@@ -30,6 +30,8 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
+    # Must exceed the task time_limit (3600 s) or Redis redelivers a running acks_late task.
+    broker_transport_options={"visibility_timeout": 7200},
 )
 
 

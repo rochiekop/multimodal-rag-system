@@ -5,7 +5,7 @@ Generated from the Plan 8 execution ledger and the fresh-install verification (2
 ## Rulings made during execution
 
 - Ruling: fix the BM25 offline load now (sparse.py loads from the cached snapshot path when present) plus restore Dockerfile line continuations and log /api/health access at DEBUG — an HF outage would otherwise break chat and ingestion in production — cost if wrong: one small fix round.
-- Ruling: fold two Task 4 minors into Task 5 dispatch — `make dev` starts only backend services (no caddy/frontend, no 80/443 or basic-auth needed), and the Caddy @upload matcher adds `method POST` (spec says 500 MB on POST) — cost if wrong: none.
+- Ruling: fold two Task 4 minors into Task 5 dispatch — `make dev` starts only backend services (Caddy and the frontend aren't started; the PHOENIX_BASIC_AUTH_* keys must still exist in deploy/.env, the .env.example placeholders are fine), and the Caddy @upload matcher adds `method POST` (spec says 500 MB on POST) — cost if wrong: none.
 - Ruling: fix lib.sh ROOT with `pwd -W` fallback `pwd`, and convert user-supplied absolute paths with `cygpath -m` when available — plan-mandated code was wrong for Windows; constraint "runnable from Git Bash" is binding — cost if wrong: none on Linux (pwd -W absent → pwd).
 - Ruling (Task 7): Phoenix is proxied with `handle_path /phoenix*` (prefix stripped) while `PHOENIX_HOST_ROOT_PATH=/phoenix` stays set. With plain `handle` the HTML loaded but every asset under `/phoenix/assets/` returned the SPA page instead of the file. Phoenix's OTLP endpoint stays `http://phoenix:6006/v1/traces` (the `/phoenix/v1/traces` path answers 405); 112 traces arrived in the `multimodal-rag` project.
 

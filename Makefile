@@ -16,7 +16,7 @@ ps:
 logs:
 	$(COMPOSE) logs -f --tail=200
 
-dev:                 ## Backend services only, with the API (8000) and Phoenix (6006) on localhost; no Caddy, frontend or Phoenix auth needed
+dev:                 ## Backend services only, with the API (8000) and Phoenix (6006) on localhost; no Caddy or frontend; PHOENIX_BASIC_AUTH_* must still exist in deploy/.env (.env.example placeholders are fine)
 	$(COMPOSE) -f deploy/docker-compose.dev.yml up -d --build postgres redis qdrant clamav phoenix api worker worker-eval
 
 create-superadmin:   ## Create the first super admin (prompts)

@@ -12,7 +12,7 @@ import {
   RunSummary,
 } from "@/components/admin/run-summary"
 import { adminApi } from "@/lib/admin-api"
-import { traceUrl } from "@/lib/config"
+import { phoenixUrl } from "@/lib/config"
 import { formatDateTime, formatUsd } from "@/lib/format"
 import type { EvalResult } from "@/lib/types"
 
@@ -63,13 +63,18 @@ const columns: ColumnDef<EvalResult>[] = [
     id: "trace",
     header: "Trace",
     cell: ({ row }) => {
-      const url = traceUrl(row.original.trace_id)
-      return url ? (
-        <a className="underline" href={url} target="_blank" rel="noreferrer">
-          Open
-        </a>
-      ) : (
-        "—"
+      const id = row.original.trace_id
+      if (!id) return "—"
+      const url = phoenixUrl()
+      return (
+        <span className="flex flex-wrap items-center gap-x-2">
+          <span className="select-all font-mono text-xs">{id}</span>
+          {url && (
+            <a className="underline" href={url} target="_blank" rel="noreferrer">
+              open Phoenix
+            </a>
+          )}
+        </span>
       )
     },
   },

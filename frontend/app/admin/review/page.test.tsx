@@ -82,6 +82,7 @@ describe("ReviewPage", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Open" }))
     const sheet = await screen.findByRole("dialog")
     expect(await within(sheet).findByText("twenty")).toBeInTheDocument()
+    expect(within(sheet).getByText("abc123")).toBeInTheDocument()
     expect(sheet.querySelector("script")).toBeNull()
     await userEvent.selectOptions(
       within(sheet).getByLabelText("Test set"),

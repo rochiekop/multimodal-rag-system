@@ -3,8 +3,8 @@ export const APP_NAME =
 
 const PHOENIX_URL = process.env.NEXT_PUBLIC_PHOENIX_URL?.replace(/\/+$/, "")
 
-/** Link to a trace in Phoenix (spec §7.2), or null when Phoenix's URL isn't configured. */
-export const traceUrl = (traceId: string | null) =>
-  PHOENIX_URL && traceId
-    ? `${PHOENIX_URL}/redirects/traces/${encodeURIComponent(traceId)}`
-    : null
+/**
+ * Phoenix projects page, or null when Phoenix's URL isn't configured. Phoenix has no
+ * deep link to a single trace, so the console shows the trace id next to this link.
+ */
+export const phoenixUrl = () => (PHOENIX_URL ? `${PHOENIX_URL}/projects` : null)

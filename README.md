@@ -46,12 +46,16 @@ An enterprise knowledge assistant. Staff upload documents (PDF, Office files, Ma
 
 ## Upgrade
 
-```bash
-git pull
-docker compose -f deploy/docker-compose.yml up -d --build
-```
+For an install made before Plan 8, do these in order:
 
-Database migrations run automatically when the API starts. Installs made before Plan 8 have no Phoenix database yet: run `make phoenix-db` once, then `up -d`.
+1. `git pull`.
+2. Add the new keys from `deploy/.env.example` to `deploy/.env`: `PHOENIX_DB_PASSWORD`, `PHOENIX_BASIC_AUTH_USER`, `PHOENIX_BASIC_AUTH_HASH` (generate it with `docker run --rm caddy:2 caddy hash-password --plaintext 'your-password'`, keep it single-quoted) and `RAG_DOMAIN`. Add `HTTP_PORT` / `HTTPS_PORT` if ports 80/443 are taken. Compose refuses to run without the required (`:?`) keys.
+3. `docker compose -f deploy/docker-compose.yml up -d postgres`
+4. `make phoenix-db` (Windows: `bash scripts/phoenix-db.sh`) creates the Phoenix database and role.
+5. `make up` for production, or `make dev` for development (API on `127.0.0.1:8000` and Phoenix on `127.0.0.1:6006`, since the base compose no longer publishes them).
+6. Optional: once the old traces aren't needed, drop the old `phoenix` schema from the app database: `docker compose -f deploy/docker-compose.yml exec postgres psql -U rag -d rag -c 'DROP SCHEMA phoenix CASCADE;'`. It isn't migrated and is otherwise included in every app backup.
+
+Caddy now needs host ports 80/443 (or `HTTP_PORT` / `HTTPS_PORT`). Database migrations run automatically when the API starts.
 
 ## Backup and restore
 
@@ -60,7 +64,7 @@ make backup                              # writes backups/<UTC timestamp>/
 make restore BACKUP=backups/<folder>
 ```
 
-A backup holds a Postgres dump, a Qdrant snapshot of the chunk collection and an archive of the files volume (originals, page images, logo). Restore replaces the current data; scripts ask for confirmation (`--yes` skips it).
+A backup holds a Postgres dump, a Qdrant snapshot of the chunk collection and an archive of the files volume (originals, page images, logo). A backup taken while ingestion runs can be slightly inconsistent, because the dump, the snapshot and the files are taken one after another. For a strictly consistent backup, stop the workers first (`docker compose -f deploy/docker-compose.yml stop worker worker-eval`) and start them again afterwards. Restore replaces the current data; scripts ask for confirmation (`--yes` skips it).
 
 Schedule it with cron, for example `0 2 * * * cd /opt/rag && make backup`, and copy the folders off the host.
 
@@ -70,12 +74,13 @@ Schedule it with cron, for example `0 2 * * * cd /opt/rag && make backup`, and c
 
 - Logs: `make logs` or `docker compose -f deploy/docker-compose.yml logs -f <service>`. Backend logs are JSON and carry a request ID; Caddy overwrites any client-supplied `X-Request-ID`, so audit rows can be trusted.
 - Phoenix (LLM traces): `https://<domain>/phoenix`, behind basic auth (`PHOENIX_BASIC_AUTH_USER` / `PHOENIX_BASIC_AUTH_HASH`).
+- Traces: in Phoenix, filter spans by the trace id shown in the console.
 - Health: `docker compose -f deploy/docker-compose.yml ps` (every service should be `healthy` or `running`); `GET /api/health` for the API; the admin dashboard shows database, Qdrant and Redis.
 - Limits: 100 MB per file and 500 MB per upload request; other API requests are capped at 10 MB.
 
 ## Development
 
-- `make dev` starts only the backend services with the API on port 8000 and Phoenix on 6006 (no Caddy, no frontend, no basic auth).
+- `make dev` starts only the backend services with the API on port 8000 and Phoenix on 6006 (Caddy and the frontend aren't started; the `PHOENIX_BASIC_AUTH_*` keys must still exist in `deploy/.env`, the `.env.example` placeholders are fine).
 - Frontend: in `frontend/`, `npm run dev`. See `frontend/README.md`.
 - Backend tests: `cd backend && uv run pytest` (needs Docker for testcontainers). Also `uv run ruff check .`, `uv run ruff format --check .` and `uv run mypy`.
 - Frontend checks: `npm test`, `npm run lint`, `npm run typecheck`, `npm run build`.

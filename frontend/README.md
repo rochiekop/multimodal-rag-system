@@ -11,9 +11,8 @@ Everything talks to the FastAPI backend through `/api`.
 
 1. Install dependencies with `npm install`. The `.npmrc` sets `legacy-peer-deps=true`, which is
    needed because the peer ranges of `@vitejs/plugin-react` 6 and shadcn's Babel 7 conflict.
-2. Start the backend stack from the repo root with the dev override:
-   `docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d`
-   (a `make dev` target wraps this).
+2. Start the backend services from the repo root with `make dev` (API on `127.0.0.1:8000`,
+   Phoenix on `127.0.0.1:6006`; Caddy and the frontend container are not started).
 3. Run `npm run dev`. It proxies `/api` to `BACKEND_URL` (default `http://127.0.0.1:8000`).
 
 ## Checks

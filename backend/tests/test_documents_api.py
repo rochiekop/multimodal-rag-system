@@ -375,7 +375,7 @@ async def test_stuck_versions_can_be_retried_after_timeout(
     recent = await client.post(f"/api/admin/versions/{version_id}/retry", headers=bearer(token))
     assert recent.status_code == 409
 
-    version.updated_at = datetime.now(UTC) - timedelta(minutes=31)
+    version.updated_at = datetime.now(UTC) - timedelta(minutes=71)
     await session.commit()
     stuck = await client.post(f"/api/admin/versions/{version_id}/retry", headers=bearer(token))
     assert stuck.status_code == 200
@@ -398,7 +398,7 @@ async def test_queued_versions_can_be_retried_only_after_timeout(
     recent = await client.post(f"/api/admin/versions/{version_id}/retry", headers=bearer(token))
     assert recent.status_code == 409
 
-    version.updated_at = datetime.now(UTC) - timedelta(minutes=31)
+    version.updated_at = datetime.now(UTC) - timedelta(minutes=71)
     await session.commit()
     stuck = await client.post(f"/api/admin/versions/{version_id}/retry", headers=bearer(token))
     assert stuck.status_code == 200
