@@ -8,6 +8,7 @@ source "$(dirname "$0")/lib.sh"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 dest="${1:-$ROOT/backups/$stamp}"
 mkdir -p "$dest"
+dest="$(native_path "$dest")"
 pg_user="$(env_value POSTGRES_USER)"
 pg_db="$(env_value POSTGRES_DB)"
 collection="$(qdrant_collection)"
@@ -26,13 +27,21 @@ c = sys.argv[1]
 req = urllib.request.Request(f"http://qdrant:6333/collections/{c}/snapshots?wait=true", method="POST")
 print(json.load(urllib.request.urlopen(req, timeout=3600))["result"]["name"])
 ' "$collection" | tr -d '\r')"
-compose cp "qdrant:/qdrant/snapshots/$collection/$snapshot" "$dest/qdrant-$collection.snapshot"
-compose exec -T api python -c '
+delete_snapshot() {
+  compose exec -T api python -c '
 import sys, urllib.request
 c, name = sys.argv[1], sys.argv[2]
 req = urllib.request.Request(f"http://qdrant:6333/collections/{c}/snapshots/{name}", method="DELETE")
 urllib.request.urlopen(req, timeout=60)
 ' "$collection" "$snapshot"
+}
+# Always remove the snapshot from Qdrant, even if copying it out fails.
+if ! compose cp "qdrant:/qdrant/snapshots/$collection/$snapshot" "$dest/qdrant-$collection.snapshot"; then
+  delete_snapshot || true
+  echo "error: could not copy the Qdrant snapshot" >&2
+  exit 1
+fi
+delete_snapshot
 
 compose exec -T api tar -czf - -C /data/files . > "$dest/files.tar.gz"
 

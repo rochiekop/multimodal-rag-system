@@ -1,7 +1,12 @@
 # shellcheck shell=bash
 # Shared helpers for the ops scripts. Source it; don't run it.
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${RAG_ENV_FILE:-$ROOT/deploy/.env}"
+# pwd -W gives D:/... on Git Bash (docker.exe needs it); plain pwd elsewhere.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && { pwd -W 2>/dev/null || pwd; })"
+# Native path for docker.exe on Git Bash; unchanged elsewhere.
+native_path() {
+  if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
+}
+ENV_FILE="$(native_path "${RAG_ENV_FILE:-$ROOT/deploy/.env}")"
 export MSYS_NO_PATHCONV=1  # Git Bash on Windows: don't rewrite container paths like /data/files
 
 [ -f "$ENV_FILE" ] || { echo "error: $ENV_FILE not found (copy deploy/.env.example)" >&2; exit 1; }
