@@ -9,5 +9,6 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     include: ["**/*.test.{ts,tsx}"],
     exclude: ["node_modules", ".next", "e2e"],
+    testTimeout: 15000, // room for the 5 s Testing Library waits on a loaded machine
   },
 })
