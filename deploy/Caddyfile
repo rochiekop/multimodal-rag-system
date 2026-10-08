@@ -26,8 +26,9 @@
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 	}
 
-	# Phoenix (LLM traces) has no login of its own: basic auth, and no app CSP.
-	handle /phoenix* {
+	# Phoenix (LLM traces) has no login of its own: basic auth, and no app CSP. It builds its links
+	# with the /phoenix prefix (PHOENIX_HOST_ROOT_PATH) but serves its routes without it, so strip it.
+	handle_path /phoenix* {
 		basic_auth {
 			{$PHOENIX_BASIC_AUTH_USER} {$PHOENIX_BASIC_AUTH_HASH}
 		}
