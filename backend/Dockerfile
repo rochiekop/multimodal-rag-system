@@ -25,6 +25,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
     FASTEMBED_CACHE_PATH=/app/.cache/fastembed \
     RAG_FILES_DIR=/data/files
 USER appuser
-RUN python -m app.ingestion.warmup
+# Model downloads are cached across rebuilds (BuildKit), then copied into the image layer.
+RUN --mount=type=cache,target=/tmp/model-cache,uid=10001,gid=10001     HF_HOME=/tmp/model-cache/huggingface     FASTEMBED_CACHE_PATH=/tmp/model-cache/fastembed     TIKTOKEN_CACHE_DIR=/tmp/model-cache/tiktoken     python -m app.ingestion.warmup     && cp -a /tmp/model-cache/. /app/.cache/
 EXPOSE 8000
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --proxy-headers"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*' --no-access-log"]

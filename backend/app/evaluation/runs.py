@@ -4,7 +4,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from statistics import mean
 from typing import Any
 
@@ -23,9 +23,23 @@ from app.users.models import Group, User
 
 logger = logging.getLogger(__name__)
 REGRESSION_DROP = 0.1
+RUN_TIMEOUT = timedelta(hours=6)
+TIMED_OUT = "Timed out: the evaluation worker stopped"
 # Per-case 0/1 metrics averaged into a summary rate: "I don't know" accuracy on unanswerable
 # cases, and the share of answerable cases that got a cited answer. Both feed the score.
 RATES = {"idk_accuracy": "idk_correct", "answered_rate": "answered"}
+
+
+async def reap_stale_runs(session: AsyncSession, now: datetime | None = None) -> int:
+    """Fail runs stuck in `running` past RUN_TIMEOUT. Runs are acked early, so a worker that
+    died mid-run would otherwise leave them running forever. Flushes; the caller commits."""
+    now = now or datetime.now(UTC)
+    result = await session.execute(
+        update(EvalRun)
+        .where(EvalRun.status == "running", EvalRun.started_at < now - RUN_TIMEOUT)
+        .values(status="failed", error=TIMED_OUT, finished_at=now)
+    )
+    return result.rowcount or 0
 
 
 async def create_run(

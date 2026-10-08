@@ -4,7 +4,6 @@ import zipfile
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -346,14 +345,15 @@ async def test_earlier_files_are_enqueued_when_a_later_one_fails(
         real_save(key, data)
 
     app.state.store.save = flaky_save
-    with pytest.raises(OSError):
-        await _upload(
-            client,
-            token,
-            collection_id,
-            ("a.md", MD, "text/markdown"),
-            ("b.md", MD + b"b\n", "text/markdown"),
-        )
+    response = await _upload(
+        client,
+        token,
+        collection_id,
+        ("a.md", MD, "text/markdown"),
+        ("b.md", MD + b"b\n", "text/markdown"),
+    )
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "internal_error"
     assert len(enqueued) == 1
 
 
